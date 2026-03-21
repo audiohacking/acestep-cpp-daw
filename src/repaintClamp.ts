@@ -36,13 +36,14 @@ export function clampRepaintingSeconds(
 /**
  * ace-synth interprets repainting_start/end as **seconds along --src-audio**.
  * Short context WAV + DAW beat coordinates → both clamp to clip end → engine error; we fix here.
+ * @returns WAV duration in seconds when readable, else `null`.
  */
 export async function clampRepaintingToSourceAudio(
   reqJson: Record<string, unknown>,
   sourceAudioPath: string,
   body: Record<string, unknown>,
   opts?: { taskId?: string }
-): Promise<void> {
+): Promise<number | null> {
   const duration = await readWavDurationSeconds(sourceAudioPath);
   const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase() || "?";
   const tag = opts?.taskId ? `[acestep-api] ${opts.taskId}` : "[acestep-api]";
@@ -52,7 +53,7 @@ export async function clampRepaintingToSourceAudio(
       `${tag} clampRepaintingBounds task_type=${taskType}: could not read WAV duration (need RIFF/WAV for --src-audio); ` +
         `repainting bounds left unchanged: start=${reqJson.repainting_start} end=${reqJson.repainting_end} path=${sourceAudioPath}`
     );
-    return;
+    return null;
   }
 
   const rs0 = Number(reqJson.repainting_start);
@@ -68,6 +69,52 @@ export async function clampRepaintingToSourceAudio(
   );
   reqJson.repainting_start = start;
   reqJson.repainting_end = end;
+  return duration;
+}
+
+/** Segments shorter than this (after clamp) are treated as bogus UI/coordinate bugs — clear mask and use full duration. */
+export const MIN_REPAINT_SEGMENT_SEC = 0.5;
+
+/**
+ * If repainting defines a **tiny** window (e.g. 0–0.1s), `applySegmentTargetDuration` would set `duration` to that
+ * value and acestep.cpp gets an invalid request. Collapse to **unset** repainting (-1,-1) and restore `duration`
+ * from the source WAV or `audio_duration` metadata.
+ */
+export function collapseDegenerateRepaintWindow(
+  reqJson: Record<string, unknown>,
+  body: Record<string, unknown>,
+  sourceDurationSec: number | null,
+  opts?: { taskId?: string }
+): void {
+  const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase();
+  if (!["lego", "repaint", "cover"].includes(taskType)) return;
+
+  const rs = Number(reqJson.repainting_start);
+  const re = Number(reqJson.repainting_end);
+  if (!Number.isFinite(rs) || !Number.isFinite(re) || rs < 0 || re <= rs) return;
+
+  const segmentSec = re - rs;
+  if (segmentSec >= MIN_REPAINT_SEGMENT_SEC) return;
+
+  const tag = opts?.taskId ? `[acestep-api] ${opts.taskId}` : "[acestep-api]";
+  const metaDur = Number(body.audio_duration ?? body.audioDuration ?? body.duration ?? 0);
+  const fullDur =
+    sourceDurationSec != null && sourceDurationSec > 0
+      ? sourceDurationSec
+      : Number.isFinite(metaDur) && metaDur > 0
+        ? metaDur
+        : Number(reqJson.duration ?? 0);
+
+  console.log(
+    `${tag} degenerateRepaintWindow task_type=${taskType}: segment=${segmentSec.toFixed(4)}s < ${MIN_REPAINT_SEGMENT_SEC}s ` +
+      `→ repainting=(-1,-1), duration=${fullDur > 0 ? fullDur : "unchanged"}`
+  );
+
+  reqJson.repainting_start = -1;
+  reqJson.repainting_end = -1;
+  if (fullDur > 0) {
+    reqJson.duration = fullDur;
+  }
 }
 
 /**

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { applySegmentTargetDuration, clampRepaintingSeconds } from "../src/repaintClamp";
+import {
+  applySegmentTargetDuration,
+  clampRepaintingSeconds,
+  collapseDegenerateRepaintWindow,
+  MIN_REPAINT_SEGMENT_SEC,
+} from "../src/repaintClamp";
 
 describe("clampRepaintingSeconds", () => {
   test("DAW beats 4–8 on 0.1s clip: after beat→sec still collapses → -1", () => {
@@ -72,5 +77,35 @@ describe("applySegmentTargetDuration", () => {
     const req: Record<string, unknown> = { duration: 60, repainting_start: 0, repainting_end: 10 };
     applySegmentTargetDuration(req, { task_type: "text2music", audio_duration: 120 });
     expect(req.duration).toBe(60);
+  });
+});
+
+describe("collapseDegenerateRepaintWindow", () => {
+  test("tiny segment after segment-duration override → full clip", () => {
+    const req: Record<string, unknown> = {
+      duration: 128,
+      repainting_start: 0,
+      repainting_end: 0.1,
+    };
+    const body = { task_type: "lego", audio_duration: 128 };
+    applySegmentTargetDuration(req, body);
+    expect(req.duration).toBeCloseTo(0.1, 5);
+
+    collapseDegenerateRepaintWindow(req, body, 90, {});
+    expect(req.repainting_start).toBe(-1);
+    expect(req.repainting_end).toBe(-1);
+    expect(req.duration).toBe(90);
+  });
+
+  test("segment >= MIN is unchanged", () => {
+    const req: Record<string, unknown> = {
+      repainting_start: 0,
+      repainting_end: MIN_REPAINT_SEGMENT_SEC,
+    };
+    const body = { task_type: "lego", audio_duration: 60 };
+    applySegmentTargetDuration(req, body);
+    collapseDegenerateRepaintWindow(req, body, 60, {});
+    expect(req.repainting_start).toBe(0);
+    expect(req.repainting_end).toBe(MIN_REPAINT_SEGMENT_SEC);
   });
 });

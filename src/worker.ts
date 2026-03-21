@@ -6,13 +6,19 @@ import * as store from "./store";
 import { mergeMetadata } from "./normalize";
 import { parseFormBoolean } from "./parseBool";
 import { resolveModelFile, resolveReferenceAudioPath, toAbsolutePath, isPathWithin, removePathIfUnder } from "./paths";
-import { applySegmentTargetDuration, clampRepaintingToSourceAudio } from "./repaintClamp";
+import {
+  applySegmentTargetDuration,
+  clampRepaintingToSourceAudio,
+  collapseDegenerateRepaintWindow,
+} from "./repaintClamp";
 
 /** API body (snake_case / camelCase) -> acestep.cpp request JSON. */
 export function apiToRequestJson(body: Record<string, unknown>): Record<string, unknown> {
   const str = (v: unknown) => (v == null ? "" : String(v));
+  const trim = (v: unknown) => str(v).trim();
   const num = (v: unknown, def: number) => (v == null || v === "" ? def : Number(v));
-  const prompt = str(body.prompt ?? body.caption ?? "");
+  /** FormData / JSON often sends `prompt: ""`; `??` would ignore a populated `caption` (DAW builds caption from global_caption + prompt). */
+  const prompt = trim(body.prompt) || trim(body.caption);
   const lyrics = str(body.lyrics ?? "");
   const taskType = str(body.task_type ?? body.taskType ?? "text2music").toLowerCase();
   /** examples/lego.json baseline */
@@ -98,6 +104,20 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
     req.audio_codes = "";
   }
 
+  /**
+   * ACE-Step-DAW sends `inference_steps` / `guidance_scale` / `shift` from **project defaults** (usually
+   * turbo: ~8 steps, 7.0, 3.0). acestep.cpp **lego** matches `examples/lego.json`: base DiT with **50 / 1.0 / 1.0**.
+   * Feeding turbo defaults into the lego pipeline breaks generation.
+   */
+  const legoClientDiffusion =
+    parseFormBoolean(body.lego_client_diffusion ?? body.legoClientDiffusion, false) ||
+    String(process.env.ACESTEP_LEGO_CLIENT_DIFFUSION ?? "").trim() === "1";
+  if (legoJsonDefaults && !legoClientDiffusion) {
+    req.inference_steps = 50;
+    req.guidance_scale = 1.0;
+    req.shift = 1.0;
+  }
+
   return req;
 }
 
@@ -108,7 +128,15 @@ export function shouldRunAceLm(body: Record<string, unknown>, reqJson: Record<st
   const thinking = parseFormBoolean(body.thinking, false);
   const useFormat = parseFormBoolean(body.use_format ?? body.useFormat ?? body.format, false);
   const sampleMode = parseFormBoolean(body.sample_mode ?? body.sampleMode, false);
-  return thinking || useFormat || sampleMode;
+  if (thinking || useFormat || sampleMode) return true;
+
+  /**
+   * Lego / repaint / cover with `--src-audio` follow acestep.cpp’s two-step flow (see upstream `examples/lego.sh`):
+   * ace-lm writes numbered `request*.json` **with** `audio_codes`, then ace-synth consumes them + source WAV.
+   * The DAW often sends `thinking=false`; without LM, ace-synth sees `audio_codes: (none)` and fails or misbehaves.
+   */
+  const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase();
+  return taskType === "lego" || taskType === "repaint" || taskType === "cover";
 }
 
 export function resolveLmPath(body: Record<string, unknown>): string {
@@ -256,8 +284,9 @@ export async function runPipeline(taskId: string): Promise<void> {
     /** Uploaded or path-based source for cover/repaint/lego (not repaint-only). */
     const rawSrcForRepaint = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
     const reqJson = apiToRequestJson(body);
+    let srcWavDurationSec: number | null = null;
     if (rawSrcForRepaint) {
-      await clampRepaintingToSourceAudio(
+      srcWavDurationSec = await clampRepaintingToSourceAudio(
         reqJson,
         toAbsolutePath(resolveReferenceAudioPath(rawSrcForRepaint)),
         body,
@@ -266,6 +295,8 @@ export async function runPipeline(taskId: string): Promise<void> {
     }
     /** Align `duration` with repainting window for lego/repaint/cover (see applySegmentTargetDuration). */
     applySegmentTargetDuration(reqJson, body, { taskId });
+    /** DAW/UI glitches can yield sub-second masks (e.g. 0–0.1s) → unusable `duration`; fall back to full-clip semantics. */
+    collapseDegenerateRepaintWindow(reqJson, body, srcWavDurationSec, { taskId });
 
     await writeFile(requestPath, JSON.stringify(reqJson, null, 0));
 
@@ -284,7 +315,9 @@ export async function runPipeline(taskId: string): Promise<void> {
     );
 
     if (needLm && !lmPath) {
-      throw new Error("ACESTEP_LM_MODEL (or lm_model_path) required when thinking, use_format, or sample_mode is enabled");
+      throw new Error(
+        "ACESTEP_LM_MODEL (or lm_model_path) required for lego/repaint/cover (src audio) or when thinking, use_format, or sample_mode is enabled"
+      );
     }
 
     if (runLm) {

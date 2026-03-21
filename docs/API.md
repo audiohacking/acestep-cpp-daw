@@ -100,6 +100,12 @@ Both **snake_case** and **camelCase** aliases are accepted. Metadata can also be
 | `vocal_language` | string | `"en"` | Lyrics language (`en`, `zh`, `ja`, …) |
 | `audio_format` | string | `"mp3"` | Output format: `mp3` or `wav` |
 
+> **`task_type` `lego` / `repaint` / `cover` (with source or reference audio):** If you omit **`audio_code_string`**, the server **always runs `ace-lm`** before `ace-synth` so the numbered `request*.json` files include **`audio_codes`** (same two-phase flow as acestep.cpp’s `examples/lego.sh`). **`thinking` does not need to be `true`** for that — the DAW may keep `thinking=false`.
+
+> **`task_type` `lego` — diffusion defaults:** The DAW usually sends **`inference_steps` / `guidance_scale` / `shift`** from **global project defaults** (often tuned for **turbo** DiT: e.g. 8 / 7.0 / 3.0). That does **not** match acestep.cpp’s **lego + base DiT** profile (`examples/lego.json`: **50 / 1.0 / 1.0**). This server **rewrites** those three fields for `lego` unless you opt out with **`lego_client_diffusion: true`** on the request or **`ACESTEP_LEGO_CLIENT_DIFFUSION=1`** in the environment.
+
+> **Repainting glitches:** If, after clamping to the uploaded WAV, the active window **`repainting_end - repainting_start`** is **&lt; 0.5s**, the mask is treated as bogus (common when coordinates don’t match the file) and is cleared to **`(-1, -1)`**; **`duration`** is restored from the WAV length or **`audio_duration`**.
+
 #### Sample / Description Mode
 
 | Parameter | Type | Default | Description |
