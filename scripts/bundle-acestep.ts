@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 /**
  * Downloads acestep.cpp v0.0.3 release binaries for the current OS/arch and
- * installs them under <repo>/acestep-runtime/bin (ace-lm, ace-synth).
+ * installs the full archive contents under <repo>/acestep-runtime/bin
+ * (ace-lm, ace-synth, ace-server, ace-understand, neural-codec, mp3-codec,
+ * quantize, and all shared libraries).
  *
  * @see https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3
  * @see https://github.com/audiohacking/acestep.cpp/blob/master/README.md
@@ -89,25 +91,35 @@ async function main() {
   const all = await walkFiles(extractRoot);
   const wantLm = process.platform === "win32" ? "ace-lm.exe" : "ace-lm";
   const wantSynth = process.platform === "win32" ? "ace-synth.exe" : "ace-synth";
-  let lm = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantLm);
-  let synth = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantSynth);
+  const lm = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantLm);
+  const synth = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantSynth);
   if (!lm || !synth) {
     throw new Error(`Could not find ${wantLm} / ${wantSynth} under ${extractRoot}`);
   }
 
   await rm(outBin, { recursive: true, force: true });
   await mkdir(outBin, { recursive: true });
-  const outLm = join(outBin, wantLm);
-  const outSynth = join(outBin, wantSynth);
-  await copyFile(lm, outLm);
-  await copyFile(synth, outSynth);
 
-  if (process.platform !== "win32") {
-    await chmod(outLm, 0o755);
-    await chmod(outSynth, 0o755);
+  // Copy every file from the archive root so that shared libraries
+  // (libggml*.so / *.dylib / *.dll) and helper binaries are all present.
+  const installed: string[] = [];
+  for (const srcPath of all) {
+    const name = srcPath.split(/[/\\]/).pop() ?? "";
+    const destPath = join(outBin, name);
+    await copyFile(srcPath, destPath);
+    installed.push(destPath);
   }
 
-  console.log(`[bundle-acestep] Installed:\n  ${outLm}\n  ${outSynth}`);
+  if (process.platform !== "win32") {
+    // Make all regular files (not static libs) executable so every binary works.
+    for (const destPath of installed) {
+      if (!destPath.endsWith(".a")) {
+        await chmod(destPath, 0o755);
+      }
+    }
+  }
+
+  console.log(`[bundle-acestep] Installed ${installed.length} file(s) to ${outBin}:\n  ${installed.map((p) => p.split(/[/\\]/).pop()).join("\n  ")}`);
 }
 
 main().catch((e) => {

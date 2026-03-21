@@ -6,15 +6,24 @@
 
 ## Bundled acestep.cpp (v0.0.3)
 
-`bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, installs them under `acestep-runtime/bin/`, compiles `dist/acestep-api`, then copies `acestep-runtime` next to the executable:
+`bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, installs the **full archive contents** under `acestep-runtime/bin/`, compiles `dist/acestep-api`, then copies `acestep-runtime` next to the executable.
+
+The prebuilt archives include executables and all shared libraries needed to run them:
 
 ```text
 dist/
-  acestep-api          # or acestep-api.exe
+  acestep-api                # or acestep-api.exe
   acestep-runtime/
     bin/
-      ace-lm
-      ace-synth
+      ace-lm                 # 5Hz LM (text + lyrics → audio codes)
+      ace-synth              # DiT + VAE (audio codes → audio)
+      ace-server             # standalone HTTP server
+      ace-understand         # reverse: audio → metadata
+      neural-codec           # VAE encode/decode utility
+      mp3-codec              # MP3 encoder/decoder utility
+      quantize               # GGUF requantizer
+      libggml*.so / *.dylib  # GGML shared libraries (Linux / macOS)
+      *.dll                  # GGML DLLs (Windows)
 ```
 
 Run the API **from `dist/`** (or anywhere) — the binary resolves siblings via `dirname(execPath)`:

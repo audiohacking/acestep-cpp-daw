@@ -552,9 +552,18 @@ curl "http://localhost:8001/v1/audio?path=%2Fabc123.mp3" -o output.mp3
 
 ### 11.2 Response
 
+Runs `ace-synth` without arguments (which prints its usage and exits non-zero) to confirm the binary is present and executable. The `binary` field is `"ok"` when the binary starts successfully, or `"unavailable"` when it cannot be found or run.
+
 ```json
 {
-  "data": { "status": "ok", "service": "ACE-Step API", "version": "1.0" },
+  "data": {
+    "status": "ok",
+    "service": "ACE-Step API",
+    "version": "1.0",
+    "binary": "ok",
+    "binary_path": "/path/to/acestep-runtime/bin/ace-synth",
+    "binary_hint": "Usage: ace-synth --request <json...> ..."
+  },
   "code": 200,
   "error": null,
   "timestamp": 1700000000000,

@@ -1,5 +1,6 @@
 import { mkdir } from "fs/promises";
 import { join, resolve } from "path";
+import { existsSync } from "fs";
 import { config } from "./config";
 import { requireAuth } from "./auth";
 import { jsonRes } from "./res";
@@ -11,6 +12,25 @@ import { mergeMetadata, parseParamObj } from "./normalize";
 import { isPathWithin } from "./paths";
 
 const AUDIO_PATH_PREFIX = "/";
+
+/** Run ace-synth with no arguments to confirm the binary is present and executable. */
+async function probeAceSynth(): Promise<{ ok: boolean; path: string; hint: string }> {
+  const binDir = config.acestepBinDir;
+  const bin = join(binDir, process.platform === "win32" ? "ace-synth.exe" : "ace-synth");
+  if (!existsSync(bin)) {
+    return { ok: false, path: bin, hint: "binary not found" };
+  }
+  try {
+    const proc = Bun.spawn([bin], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr] = await Promise.all([proc.stdout.text(), proc.stderr.text()]);
+    await proc.exited;
+    // ace-synth prints usage and exits non-zero when run with no arguments — that is expected.
+    const out = (stdout + stderr).trim();
+    return { ok: true, path: bin, hint: out.slice(0, 300) || "ok" };
+  } catch (e) {
+    return { ok: false, path: bin, hint: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 function parsePath(pathParam: string): string {
   const decoded = decodeURIComponent(pathParam);
@@ -157,7 +177,15 @@ async function handle(req: Request): Promise<Response> {
   if (path === "/health" && req.method === "GET") {
     const authErr = requireAuth(req.headers.get("Authorization"), undefined);
     if (authErr) return authErr;
-    return jsonRes({ status: "ok", service: "ACE-Step API", version: "1.0" });
+    const probe = await probeAceSynth();
+    return jsonRes({
+      status: "ok",
+      service: "ACE-Step API",
+      version: "1.0",
+      binary: probe.ok ? "ok" : "unavailable",
+      binary_path: probe.path,
+      binary_hint: probe.hint,
+    });
   }
 
   if (path === "/v1/models" && req.method === "GET") {

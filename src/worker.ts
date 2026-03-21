@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { mkdir, writeFile, rename, unlink, readdir, readFile } from "fs/promises";
+import { mkdir, writeFile, rename, rm, readdir, readFile } from "fs/promises";
 import { join, resolve } from "path";
 import { config } from "./config";
 import * as store from "./store";
@@ -356,14 +356,7 @@ export async function runPipeline(taskId: string): Promise<void> {
     store.setTaskFailed(taskId, msg, JSON.stringify([failItem]));
   } finally {
     store.recordJobDuration(Date.now() - started);
-    try {
-      const entries = await readdir(jobDir).catch(() => []);
-      for (const e of entries) {
-        await unlink(join(jobDir, e)).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
+    await rm(jobDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
