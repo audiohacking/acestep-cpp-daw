@@ -10,12 +10,12 @@
 
 This repo includes **[ACE-Step-DAW](https://github.com/ace-step/ACE-Step-DAW)** as a **git submodule** at `ACE-Step-DAW/`.
 
-Clone with submodules:
+Clone with the **ACE-Step-DAW** submodule (one level only — do **not** use `--recursive` here; upstream DAW may reference optional nested submodules without public URLs):
 
 ```bash
-git clone --recurse-submodules <repo-url>
-# or after clone:
-git submodule update --init --recursive
+git clone <repo-url>
+cd acestep-cpp-api
+git submodule update --init ACE-Step-DAW
 ```
 
 **Demo (DAW UI + API):** set **`ACESTEP_MODELS_DIR`** to a folder containing the usual Hugging Face / acestep.cpp **`.gguf`** files (flat directory). The server **auto-detects** LM, embedding, VAE, DiT **base**, DiT **turbo**, and turbo+**shift** by filename (see [Models directory](#models-directory-always-via-env)). You can still override any path with **`ACESTEP_LM_MODEL`**, etc. Then bundle binaries, build the DAW, start:

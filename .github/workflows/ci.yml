@@ -33,7 +33,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          # Top-level ACE-Step-DAW only. Do not recurse: upstream DAW may list nested
+          # submodules (e.g. tooling) without public URLs, which breaks CI.
+          submodules: true
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
