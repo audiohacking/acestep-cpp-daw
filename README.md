@@ -2,6 +2,8 @@
 
 [ACE-Step 1.5 HTTP API](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/API.md) emulator backed by **[acestep.cpp](https://github.com/audiohacking/acestep.cpp)** + **[Bun](https://bun.sh)**.
 
+→ **Full API reference**: [`docs/API.md`](docs/API.md)
+
 ## Bundled acestep.cpp (v0.0.3)
 
 `bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, installs them under `acestep-runtime/bin/`, compiles `dist/acestep-api`, then copies `acestep-runtime` next to the executable:
@@ -47,6 +49,29 @@ export ACESTEP_VAE_MODEL=vae-BF16.gguf
 ```
 
 Per-request `lm_model_path` and **`ACESTEP_MODEL_MAP`** values use the same resolution rules.
+
+## Multi-model support (GET /v1/models + per-request `model`)
+
+Register multiple DiT models via `ACESTEP_MODEL_MAP` (JSON). The available model list is **derived automatically** from the map keys — no separate list variable is needed. Select a model per-request using the `model` field in `/release_task`.
+
+```bash
+export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+export ACESTEP_MODEL_MAP='{"acestep-v15-turbo":"acestep-v15-turbo-Q8_0.gguf","acestep-v15-turbo-shift3":"acestep-v15-turbo-shift3-Q8_0.gguf"}'
+# Optional: set which model name is default (first map key is used if omitted)
+# export ACESTEP_DEFAULT_MODEL=acestep-v15-turbo
+```
+
+```bash
+# List models
+curl http://localhost:8001/v1/models
+
+# Generate with a specific model
+curl -X POST http://localhost:8001/release_task \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "jazz piano trio", "model": "acestep-v15-turbo-shift3"}'
+```
+
+Generation parameters (`inference_steps`, `guidance_scale`, `bpm`, etc.) are **always per-request** and are never fixed by environment variables.
 
 ## Run (source)
 
@@ -97,7 +122,7 @@ Worker uses **`src_audio_path`** when set, otherwise **`reference_audio_path`**;
 
 ## API emulation notes
 
-See earlier revisions for full AceStep 1.5 route mapping. **`/format_input`** and **`/create_random_sample`** remain shape-compatible stubs (no separate LM HTTP service).
+See [`docs/API.md`](docs/API.md) for the full endpoint reference. **`/format_input`** and **`/create_random_sample`** are shape-compatible stubs (no separate LM HTTP service required).
 
 ## GitHub Actions
 
