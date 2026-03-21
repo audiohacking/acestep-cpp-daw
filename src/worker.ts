@@ -106,9 +106,11 @@ export function resolveLmPath(body: Record<string, unknown>): string {
 
 export function resolveDitPath(body: Record<string, unknown>): string {
   const modelName = typeof body.model === "string" ? body.model.trim() : "";
-  if (modelName && config.modelMap[modelName]) return config.modelMap[modelName];
-  if (modelName && !config.modelMap[modelName]) {
-    throw new Error(`Unknown model "${modelName}". Set ACESTEP_MODEL_MAP JSON or use a configured name.`);
+  if (modelName) {
+    if (config.modelMap[modelName]) return config.modelMap[modelName];
+    const scanned = config.scannedModelMap;
+    if (scanned[modelName]) return scanned[modelName];
+    throw new Error(`Unknown model "${modelName}". Use GET /v1/models to list available models.`);
   }
   if (!config.ditModelPath) throw new Error("ACESTEP_DIT_MODEL or ACESTEP_CONFIG_PATH not set");
   return config.ditModelPath;

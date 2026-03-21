@@ -415,7 +415,7 @@ curl -X POST http://localhost:8001/create_random_sample \
 
 - **URL**: `GET /v1/models`
 
-Returns the DiT models registered on this server. The list is derived automatically from `ACESTEP_MODEL_MAP` (no separate list variable required).
+Returns the DiT models available on this server. The list is discovered automatically by scanning `ACESTEP_MODELS_DIR` for `.gguf` files. `ACESTEP_MODEL_MAP` (if set) overrides discovery with explicit logical names. `ACESTEP_MODELS` acts as a filter/gate on the discovered list.
 
 ### 8.2 Response
 
@@ -423,10 +423,10 @@ Returns the DiT models registered on this server. The list is derived automatica
 {
   "data": {
     "models": [
-      { "name": "acestep-v15-turbo",        "is_default": true  },
-      { "name": "acestep-v15-turbo-shift3", "is_default": false }
+      { "name": "acestep-v15-turbo-Q8_0.gguf", "is_default": true  },
+      { "name": "acestep-v15-turbo-shift3-Q8_0.gguf", "is_default": false }
     ],
-    "default_model": "acestep-v15-turbo"
+    "default_model": "acestep-v15-turbo-Q8_0.gguf"
   },
   "code": 200,
   "error": null,
@@ -441,16 +441,49 @@ Returns the DiT models registered on this server. The list is derived automatica
 curl http://localhost:8001/v1/models
 ```
 
-### 8.4 Registering Multiple Models
+### 8.4 Model discovery order
 
-Set `ACESTEP_MODEL_MAP` to a JSON object mapping logical names to GGUF file paths (bare filenames resolve under `ACESTEP_MODELS_DIR`):
+1. **`ACESTEP_MODEL_MAP`** (explicit) — JSON map of `{"logical-name": "file.gguf", …}`. The logical names are exposed as the model names. Use this when you want human-friendly names instead of raw filenames.
+2. **`ACESTEP_MODELS_DIR` scan** (automatic) — `.gguf` files found in the models directory are listed by their filename (e.g. `acestep-v15-turbo-Q8_0.gguf`). Sorted alphabetically.
+3. **Fallback** — `[defaultModel]` when no directory is set and no map is configured.
+
+`ACESTEP_MODELS` (comma-separated names) acts as a **filter/gate** on whichever source is discovered (map keys or scanned filenames). Only names present in the filter are returned.
+
+### 8.5 Selecting a model per-request
+
+Use the `model` field in `/release_task` with a name from the list:
+
+```bash
+# Auto-discover — just set the models dir
+export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+
+# List what was found
+curl http://localhost:8001/v1/models
+# → ["acestep-v15-turbo-Q8_0.gguf", "acestep-v15-turbo-shift3-Q8_0.gguf", ...]
+
+# Select one per-request
+curl -X POST http://localhost:8001/release_task \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "jazz piano trio", "model": "acestep-v15-turbo-shift3-Q8_0.gguf"}'
+```
+
+Or use `ACESTEP_MODEL_MAP` for logical names:
 
 ```bash
 export ACESTEP_MODELS_DIR="$HOME/models/acestep"
 export ACESTEP_MODEL_MAP='{"acestep-v15-turbo":"acestep-v15-turbo-Q8_0.gguf","acestep-v15-turbo-shift3":"acestep-v15-turbo-shift3-Q8_0.gguf"}'
+
+curl -X POST http://localhost:8001/release_task \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "jazz piano trio", "model": "acestep-v15-turbo-shift3"}'
 ```
 
-The `/v1/models` response will list exactly those names. Select one per-request via the `model` field in `/release_task`.
+Or gate the list to a subset:
+
+```bash
+export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+export ACESTEP_MODELS="acestep-v15-turbo-Q8_0.gguf,acestep-v15-turbo-shift3-Q8_0.gguf"
+```
 
 ---
 
@@ -561,11 +594,15 @@ Only **paths** and server-level settings are configured via environment variable
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACESTEP_MODEL_MAP` | `{}` | JSON map of `{"name": "path.gguf", …}` — drives both the `/v1/models` list **and** per-request `model` parameter validation |
-| `ACESTEP_DEFAULT_MODEL` | first key of map, or `"acestep-v15-turbo"` | Name used when no `model` is specified |
-| `ACESTEP_MODELS` | *(derived from map)* | Override the `/v1/models` list explicitly (comma-separated names) |
+| `ACESTEP_MODEL_MAP` | `{}` | JSON map of `{"name": "file.gguf", …}` — explicit name→path mapping. Drives both `/v1/models` and per-request `model` validation. Takes precedence over directory scan. |
+| `ACESTEP_DEFAULT_MODEL` | first map key / first scanned file / `"acestep-v15-turbo"` | Name used when no `model` is specified per-request |
+| `ACESTEP_MODELS` | *(all discovered)* | Comma-separated **filter/gate** applied to the discovered list (map keys or scanned filenames). Only names in this list are returned by `/v1/models`. |
 
-> **Note**: `ACESTEP_MODEL_MAP` is the canonical source for multi-model setup. `ACESTEP_MODELS` and `ACESTEP_DEFAULT_MODEL` are optional overrides.
+> **Recommended minimal setup** (no `ACESTEP_MODEL_MAP` needed):
+> ```bash
+> export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+> # /v1/models will automatically list every .gguf file in that directory
+> ```
 
 ### Queue / Storage
 

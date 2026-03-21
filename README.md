@@ -52,23 +52,38 @@ Per-request `lm_model_path` and **`ACESTEP_MODEL_MAP`** values use the same reso
 
 ## Multi-model support (GET /v1/models + per-request `model`)
 
-Register multiple DiT models via `ACESTEP_MODEL_MAP` (JSON). The available model list is **derived automatically** from the map keys — no separate list variable is needed. Select a model per-request using the `model` field in `/release_task`.
+`GET /v1/models` **automatically scans `ACESTEP_MODELS_DIR`** for `.gguf` files and returns them as the available model list. No extra configuration is required.
+
+```bash
+export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+# /v1/models will list every .gguf file found there, e.g.:
+# ["acestep-v15-turbo-Q8_0.gguf", "acestep-v15-turbo-shift3-Q8_0.gguf"]
+```
+
+Use the discovered filename as the `model` value per-request:
+
+```bash
+curl http://localhost:8001/v1/models   # discover available names
+
+curl -X POST http://localhost:8001/release_task \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "jazz piano trio", "model": "acestep-v15-turbo-shift3-Q8_0.gguf"}'
+```
+
+**Optional: logical names via `ACESTEP_MODEL_MAP`** — map friendly names to GGUF filenames:
 
 ```bash
 export ACESTEP_MODELS_DIR="$HOME/models/acestep"
 export ACESTEP_MODEL_MAP='{"acestep-v15-turbo":"acestep-v15-turbo-Q8_0.gguf","acestep-v15-turbo-shift3":"acestep-v15-turbo-shift3-Q8_0.gguf"}'
-# Optional: set which model name is default (first map key is used if omitted)
-# export ACESTEP_DEFAULT_MODEL=acestep-v15-turbo
+# Now use the short names: "model": "acestep-v15-turbo"
 ```
 
-```bash
-# List models
-curl http://localhost:8001/v1/models
+**Optional: `ACESTEP_MODELS` as a filter/gate** — restrict the list to a subset:
 
-# Generate with a specific model
-curl -X POST http://localhost:8001/release_task \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt": "jazz piano trio", "model": "acestep-v15-turbo-shift3"}'
+```bash
+export ACESTEP_MODELS_DIR="$HOME/models/acestep"
+export ACESTEP_MODELS="acestep-v15-turbo-Q8_0.gguf,acestep-v15-turbo-shift3-Q8_0.gguf"
+# Only those two filenames appear in /v1/models even if more .gguf files exist
 ```
 
 Generation parameters (`inference_steps`, `guidance_scale`, `bpm`, etc.) are **always per-request** and are never fixed by environment variables.

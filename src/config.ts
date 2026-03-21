@@ -1,5 +1,5 @@
 /** Env-based config. Binaries: https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3 */
-import { resolveModelFile, resolveModelMapPaths, resolveAcestepBinDir } from "./paths";
+import { resolveModelFile, resolveModelMapPaths, resolveAcestepBinDir, listGgufFiles } from "./paths";
 
 function parseModelMap(raw: string): Record<string, string> {
   if (!raw.trim()) return {};
@@ -85,17 +85,53 @@ export const config = {
    * List of available model names shown by GET /v1/models.
    *
    * Resolution order:
-   * 1. `ACESTEP_MODELS` (comma-separated) — explicit override.
-   * 2. Keys of `ACESTEP_MODEL_MAP` — derived automatically when a map is configured.
-   * 3. `[defaultModel]` — single-model fallback so the endpoint always returns something.
+   * 1. `ACESTEP_MODEL_MAP` keys — when an explicit name→path map is configured.
+   * 2. `.gguf` files found in `modelsDir` — discovered at runtime.
+   * 3. Fallback: `ACESTEP_MODELS` list as-is (no dir to scan), or `[defaultModel]`.
+   *
+   * `ACESTEP_MODELS` (comma-separated) acts as a **filter/gate** on the discovered list
+   * (steps 1 & 2). When set, only names present in that list are returned.
    */
   get modelsList(): string[] {
-    const explicit = process.env.ACESTEP_MODELS?.trim();
-    if (explicit) return explicit.split(",").map((s) => s.trim()).filter(Boolean);
+    const filterRaw = process.env.ACESTEP_MODELS?.trim();
+    const allowed = filterRaw ? new Set(filterRaw.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+
+    // 1. Explicit MODEL_MAP: use map keys
     const mapKeys = Object.keys(getModelMapRaw());
-    if (mapKeys.length > 0) return mapKeys;
+    if (mapKeys.length > 0) {
+      return allowed ? mapKeys.filter((k) => allowed.has(k)) : mapKeys;
+    }
+
+    // 2. Scan models directory for .gguf files
+    const dir = this.modelsDir;
+    if (dir) {
+      const scanned = listGgufFiles(dir);
+      if (scanned.length > 0) {
+        return allowed ? scanned.filter((n) => allowed.has(n)) : scanned;
+      }
+    }
+
+    // 3. Fallback: use ACESTEP_MODELS list directly, or [defaultModel]
+    if (allowed) return [...allowed];
     const def = this.defaultModel;
     return def ? [def] : [];
+  },
+
+  /**
+   * Model name → resolved file path map derived from scanning `modelsDir`.
+   * Used by `resolveDitPath` so per-request `model` accepts discovered filenames.
+   * Only populated when `ACESTEP_MODEL_MAP` is not set.
+   */
+  get scannedModelMap(): Record<string, string> {
+    if (Object.keys(getModelMapRaw()).length > 0) return {};
+    const dir = this.modelsDir;
+    if (!dir) return {};
+    const files = listGgufFiles(dir);
+    const out: Record<string, string> = {};
+    for (const f of files) {
+      out[f] = resolveModelFile(f);
+    }
+    return out;
   },
 
   /**
@@ -104,13 +140,19 @@ export const config = {
    * Resolution order:
    * 1. `ACESTEP_DEFAULT_MODEL` — explicit override.
    * 2. First key of `ACESTEP_MODEL_MAP` — when a map is configured.
-   * 3. `"acestep-v15-turbo"` — hardcoded fallback label.
+   * 3. First `.gguf` file in `modelsDir` — when the directory is scanned.
+   * 4. `"acestep-v15-turbo"` — hardcoded fallback label.
    */
   get defaultModel(): string {
     const explicit = process.env.ACESTEP_DEFAULT_MODEL?.trim();
     if (explicit) return explicit;
     const mapKeys = Object.keys(getModelMapRaw());
-    if (mapKeys.length > 0) return mapKeys[0] as string;
+    if (mapKeys.length > 0) return mapKeys[0];
+    const dir = this.modelsDir;
+    if (dir) {
+      const scanned = listGgufFiles(dir);
+      if (scanned.length > 0) return scanned[0];
+    }
     return "acestep-v15-turbo";
   },
 

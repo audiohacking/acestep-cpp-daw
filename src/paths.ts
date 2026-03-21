@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { dirname, join, resolve, isAbsolute } from "path";
 
 /**
@@ -73,4 +73,19 @@ export function resolveReferenceAudioPath(pathOrName: string): string {
   if (!p) return p;
   if (isAbsolute(p)) return p;
   return join(resolve(getResourceRoot()), p);
+}
+
+/**
+ * Returns basenames of `.gguf` files found in `dir`, sorted alphabetically.
+ * Returns `[]` if `dir` is empty, does not exist, or cannot be read.
+ */
+export function listGgufFiles(dir: string): string[] {
+  if (!dir) return [];
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith(".gguf"))
+      .sort();
+  } catch {
+    return [];
+  }
 }
