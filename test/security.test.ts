@@ -2,7 +2,7 @@
  * Security-focused tests: path traversal prevention and source-path containment.
  */
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { resolve, join } from "path";
+import { resolve, join, sep } from "path";
 import { isPathWithin } from "../src/paths";
 import { resolveLmPath, resolveDitPath } from "../src/worker";
 
@@ -25,10 +25,12 @@ function audioFilePath(audioStorageDir: string, pathParam: string): string | nul
 // ---------------------------------------------------------------------------
 
 describe("path traversal prevention in /v1/audio", () => {
-  const storageDir = "/storage/audio";
+  // Use path.resolve so the base is always an absolute, platform-native path.
+  // On Windows, resolve("/storage/audio") → "C:\storage\audio"; on Unix it stays "/storage/audio".
+  const storageDir = resolve("/storage/audio");
 
   test("valid path inside storage dir is allowed", () => {
-    expect(audioFilePath(storageDir, "/abc123.mp3")).toBe("/storage/audio/abc123.mp3");
+    expect(audioFilePath(storageDir, "/abc123.mp3")).toBe(join(storageDir, "abc123.mp3"));
   });
 
   test("explicit ../ traversal is blocked", () => {
@@ -44,7 +46,7 @@ describe("path traversal prevention in /v1/audio", () => {
     // resolve treats it as such, so the result is still within the storage dir.
     const result = audioFilePath(storageDir, "....//....//etc/passwd");
     expect(result).not.toBeNull();
-    expect(result!.startsWith(storageDir)).toBe(true);
+    expect(result!.startsWith(storageDir + sep)).toBe(true);
   });
 
   test("absolute path in query param is contained within storage dir", () => {
@@ -52,11 +54,11 @@ describe("path traversal prevention in /v1/audio", () => {
     // which is then joined with storageDir to give storageDir/etc/passwd.
     const result = audioFilePath(storageDir, "/etc/passwd");
     expect(result).not.toBeNull();
-    expect(result!.startsWith(storageDir)).toBe(true);
+    expect(result!.startsWith(storageDir + sep)).toBe(true);
   });
 
   test("nested valid path is allowed", () => {
-    expect(audioFilePath(storageDir, "/sub/file.wav")).toBe("/storage/audio/sub/file.wav");
+    expect(audioFilePath(storageDir, "/sub/file.wav")).toBe(join(storageDir, "sub", "file.wav"));
   });
 
   test("prefix-only directory name is not confused with parent", () => {
