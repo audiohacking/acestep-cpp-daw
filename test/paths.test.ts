@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { resolveModelFile, resolveReferenceAudioPath } from "../src/paths";
+import { resolveModelFile, resolveReferenceAudioPath, isPathWithin } from "../src/paths";
 import { isAbsolute } from "path";
 import path from "path";
 
@@ -64,5 +64,40 @@ describe("resolveReferenceAudioPath", () => {
     expect(out.replace(/\\/g, "/")).toContain(
       process.platform === "win32" ? "C:/" : "/tmp/"
     );
+  });
+});
+
+describe("isPathWithin", () => {
+  const base = "/storage/audio";
+
+  test("path equal to parent is within", () => {
+    expect(isPathWithin("/storage/audio", base)).toBe(true);
+  });
+
+  test("child file is within parent", () => {
+    expect(isPathWithin("/storage/audio/abc123.mp3", base)).toBe(true);
+  });
+
+  test("nested child is within parent", () => {
+    expect(isPathWithin("/storage/audio/sub/file.mp3", base)).toBe(true);
+  });
+
+  test("sibling directory is not within parent", () => {
+    expect(isPathWithin("/storage/other/file.mp3", base)).toBe(false);
+  });
+
+  test("path traversal escape is rejected", () => {
+    expect(isPathWithin("/storage/audio/../../../etc/passwd", base)).toBe(false);
+  });
+
+  test("prefix-only match is not within (no sep)", () => {
+    // /storage/audiovil is NOT within /storage/audio
+    expect(isPathWithin("/storage/audiovil/file.mp3", base)).toBe(false);
+  });
+
+  test("relative paths are resolved before comparison", () => {
+    // resolve("./storage/audio/file.mp3") should land inside resolve("./storage/audio")
+    expect(isPathWithin("./storage/audio/file.mp3", "./storage/audio")).toBe(true);
+    expect(isPathWithin("./storage/other/file.mp3", "./storage/audio")).toBe(false);
   });
 });

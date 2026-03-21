@@ -1,5 +1,5 @@
 import { mkdir } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 import { config } from "./config";
 import { requireAuth } from "./auth";
 import { jsonRes } from "./res";
@@ -8,6 +8,7 @@ import * as store from "./store";
 import * as queue from "./queue";
 import { generateTaskId } from "./worker";
 import { mergeMetadata, parseParamObj } from "./normalize";
+import { isPathWithin } from "./paths";
 
 const AUDIO_PATH_PREFIX = "/";
 
@@ -187,12 +188,15 @@ async function handle(req: Request): Promise<Response> {
     if (authErr) return authErr;
     const pathParam = url.searchParams.get("path");
     if (!pathParam) return detailRes("path required", 400);
-    const safePath = parsePath(pathParam).replace(/\.\./g, "").replace(/^\/+/, "");
-    const filePath = join(config.audioStorageDir, safePath);
+    const requestedPath = parsePath(pathParam).replace(/^\/+/, "");
+    const filePath = resolve(join(config.audioStorageDir, requestedPath));
+    if (!isPathWithin(filePath, config.audioStorageDir)) {
+      return detailRes("Not Found", 404);
+    }
     try {
       const file = Bun.file(filePath);
       if (!(await file.exists())) return detailRes("Not Found", 404);
-      const ext = safePath.endsWith(".wav") ? "wav" : safePath.endsWith(".flac") ? "flac" : "mp3";
+      const ext = filePath.endsWith(".wav") ? "wav" : filePath.endsWith(".flac") ? "flac" : "mp3";
       const mime =
         ext === "wav" ? "audio/wav" : ext === "flac" ? "audio/flac" : "audio/mpeg";
       return new Response(file, {

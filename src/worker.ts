@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { mkdir, writeFile, rename, unlink, readdir, readFile } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 import { config } from "./config";
 import * as store from "./store";
 import { mergeMetadata } from "./normalize";
-import { resolveModelFile, resolveReferenceAudioPath } from "./paths";
+import { resolveModelFile, resolveReferenceAudioPath, isPathWithin } from "./paths";
 
 /** API body (snake_case / camelCase) -> acestep.cpp request JSON. */
 export function apiToRequestJson(body: Record<string, unknown>): Record<string, unknown> {
@@ -100,7 +100,16 @@ export function shouldRunAceLm(body: Record<string, unknown>, reqJson: Record<st
 
 export function resolveLmPath(body: Record<string, unknown>): string {
   const p = body.lm_model_path ?? body.lmModelPath;
-  if (typeof p === "string" && p.trim()) return resolveModelFile(p.trim());
+  if (typeof p === "string" && p.trim()) {
+    const resolved = resolveModelFile(p.trim());
+    const dir = config.modelsDir;
+    if (dir && !isPathWithin(resolved, dir)) {
+      throw new Error(
+        `lm_model_path is not within the configured models directory`
+      );
+    }
+    return resolved;
+  }
   return config.lmModelPath;
 }
 
@@ -230,7 +239,16 @@ export async function runPipeline(taskId: string): Promise<void> {
     const synthArgs: string[] = [];
     const rawSrc = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
     if (rawSrc) {
-      synthArgs.push("--src-audio", resolveReferenceAudioPath(rawSrc));
+      const resolvedSrc = resolveReferenceAudioPath(rawSrc);
+      if (
+        !isPathWithin(resolvedSrc, resolve(config.tmpDir)) &&
+        !isPathWithin(resolvedSrc, resolve(config.audioStorageDir))
+      ) {
+        throw new Error(
+          "Source audio path must be within the configured storage directories"
+        );
+      }
+      synthArgs.push("--src-audio", resolvedSrc);
     }
     synthArgs.push("--request", ...numbered);
     synthArgs.push("--embedding", embedding, "--dit", ditPath, "--vae", vae);
