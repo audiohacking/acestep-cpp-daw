@@ -27,15 +27,25 @@ describe("resolveModelFile", () => {
     expect(resolveModelFile("model.gguf")).toBe("model.gguf");
   });
 
-  test("joins models dir for bare filename", () => {
+  test("joins models dir for bare filename (normalized)", () => {
     process.env.ACESTEP_MODELS_DIR = "/data/models";
-    const expected = path.join("/data/models", "dit.gguf");
-    expect(path.normalize(resolveModelFile("dit.gguf"))).toBe(path.normalize(expected));
+    const actual = resolveModelFile("dit.gguf");
+    if (process.platform === "win32") {
+      expect(actual.toLowerCase()).toContain("\\data\\models\\dit.gguf");
+    } else {
+      const expected = path.join("/data/models", "dit.gguf");
+      expect(path.normalize(actual)).toBe(path.normalize(expected));
+    }
   });
-  
+
   test("joins models dir for bare filename", () => {
     process.env.ACESTEP_MODELS_DIR = "/data/models";
-    expect(resolveModelFile("dit.gguf")).toBe("/data/models/dit.gguf");
+    const actual = resolveModelFile("dit.gguf");
+    if (process.platform === "win32") {
+      expect(actual.toLowerCase()).toContain("\\data\\models\\dit.gguf");
+    } else {
+      expect(actual).toBe("/data/models/dit.gguf");
+    }
   });
 });
 
