@@ -58,18 +58,16 @@ CLI usage matches the upstream [acestep.cpp README](https://github.com/audiohack
 
 ## Bundled acestep.cpp binaries (v0.0.3)
 
-`bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, unpacks the **entire** release archive into **`acestep-runtime/`** (shared libraries under **`lib/`**, **`bin/ace-lm`** + **`bin/ace-synth`**, and any other bundled files — not just the two executables), compiles `dist/acestep-api`, then copies **`acestep-runtime/`** next to the executable:
+`bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, then copies **every file** from that archive into **one folder**: **`acestep-runtime/bin/`** (flat — `ace-lm`, `ace-synth`, all `.dylib` / `.dll` / `.so`, etc.; no separate `lib/` tree). Then it compiles `dist/acestep-api` and copies **`acestep-runtime/`** next to the executable.
 
 ```text
 dist/
   acestep-api          # or acestep-api.exe
   acestep-runtime/
-    bin/
+    bin/               # entire prebuild payload, single directory
       ace-lm
       ace-synth
-      *.dylib / *.dll / …   # as shipped in the release (RPATH expects these)
-    lib/                   # present on some platforms
-      …
+      (all other files from the release archive)
 ```
 
 Run the API **from `dist/`** (or anywhere) — the binary resolves siblings via `dirname(execPath)`:

@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 /**
  * Downloads acestep.cpp v0.0.3 release binaries for the current OS/arch and
- * installs the **full** extracted tree under <repo>/acestep-runtime/ (bin/, lib/,
- * and any other bundled shared libraries — not only ace-lm + ace-synth).
+ * installs **every file** from the archive into a **single directory**:
+ * `<repo>/acestep-runtime/bin/` (flat — executables, .dylib/.so/.dll, and any
+ * other payload; no lib/ subtree or nested bin/).
  *
  * @see https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3
  * @see https://github.com/audiohacking/acestep.cpp/blob/master/README.md
  */
-import { mkdir, readdir, chmod, rm, cp, rename } from "fs/promises";
-import { join, dirname } from "path";
+import { mkdir, readdir, chmod, rm, copyFile } from "fs/promises";
+import { join, dirname, basename } from "path";
 import { existsSync } from "fs";
 
 const TAG = "v0.0.3";
@@ -17,7 +18,7 @@ const DOWNLOAD_BASE = `https://github.com/${REPO}/releases/download/${TAG}`;
 
 const root = join(dirname(import.meta.path), "..");
 const cacheDir = join(root, "bundled", ".cache");
-const outRuntime = join(root, "acestep-runtime");
+const outBin = join(root, "acestep-runtime", "bin");
 
 type Asset = { name: string };
 
@@ -74,46 +75,27 @@ async function resolvePackageRoot(extractRoot: string): Promise<string> {
 }
 
 /**
- * This app resolves binaries at acestep-runtime/bin/ace-lm. If the bundle used a flat
- * layout (executables + .dylib/.dll next to each other at package root), move those into bin/.
- * Preserves a sibling lib/ directory (common RPATH: @loader_path/../lib).
+ * Copy every file from the extracted tree into `outBin` using **basename only**
+ * (flat layout so loaders find libs next to ace-lm / ace-synth).
  */
-async function ensureBinLayout(runtimeDir: string, wantLm: string, wantSynth: string): Promise<void> {
-  const binDir = join(runtimeDir, "bin");
-  if (existsSync(join(binDir, wantLm)) && existsSync(join(binDir, wantSynth))) {
-    return;
-  }
+async function flattenIntoBin(packageRoot: string, outBinDir: string): Promise<number> {
+  await mkdir(outBinDir, { recursive: true });
+  const sources = await walkFiles(packageRoot);
+  const seen = new Map<string, string>();
 
-  await mkdir(binDir, { recursive: true });
-  const top = await readdir(runtimeDir, { withFileTypes: true });
-  for (const ent of top) {
-    const src = join(runtimeDir, ent.name);
-    if (ent.name === "bin") continue;
-    if (ent.name === "lib" && ent.isDirectory()) continue;
-    if (!ent.isFile()) continue;
-
-    const n = ent.name;
-    const lower = n.toLowerCase();
-    const move =
-      n === wantLm ||
-      n === wantSynth ||
-      lower.endsWith(".dylib") ||
-      lower.endsWith(".so") ||
-      lower.endsWith(".dll") ||
-      lower.endsWith(".node");
-    if (move) {
-      await rename(src, join(binDir, n));
+  for (const src of sources) {
+    const name = basename(src);
+    const prev = seen.get(name);
+    if (prev && prev !== src) {
+      throw new Error(
+        `[bundle-acestep] Duplicate basename "${name}" in archive:\n  ${prev}\n  ${src}\n` +
+          "Cannot flatten to a single directory; report this layout."
+      );
     }
+    seen.set(name, src);
+    await copyFile(src, join(outBinDir, name));
   }
-}
-
-async function chmodMainBinaries(runtimeDir: string, wantLm: string, wantSynth: string): Promise<void> {
-  if (process.platform === "win32") return;
-  const binDir = join(runtimeDir, "bin");
-  for (const name of [wantLm, wantSynth]) {
-    const p = join(binDir, name);
-    if (existsSync(p)) await chmod(p, 0o755);
-  }
+  return sources.length;
 }
 
 async function main() {
@@ -145,32 +127,32 @@ async function main() {
   const all = await walkFiles(packageRoot);
   const wantLm = process.platform === "win32" ? "ace-lm.exe" : "ace-lm";
   const wantSynth = process.platform === "win32" ? "ace-synth.exe" : "ace-synth";
-  const lm = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantLm);
-  const synth = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantSynth);
+  const lm = all.find((p) => basename(p) === wantLm);
+  const synth = all.find((p) => basename(p) === wantSynth);
   if (!lm || !synth) {
     throw new Error(`Could not find ${wantLm} / ${wantSynth} under ${packageRoot}`);
   }
 
-  await rm(outRuntime, { recursive: true, force: true });
-  console.log(`[bundle-acestep] Copying full bundle ${packageRoot} → ${outRuntime}`);
-  await cp(packageRoot, outRuntime, { recursive: true });
+  const runtimeDir = join(root, "acestep-runtime");
+  await rm(runtimeDir, { recursive: true, force: true });
+  console.log(`[bundle-acestep] Flattening ${packageRoot} → ${outBin}`);
+  const n = await flattenIntoBin(packageRoot, outBin);
 
-  await ensureBinLayout(outRuntime, wantLm, wantSynth);
-  await chmodMainBinaries(outRuntime, wantLm, wantSynth);
+  if (process.platform !== "win32") {
+    for (const name of [wantLm, wantSynth]) {
+      const p = join(outBin, name);
+      if (existsSync(p)) await chmod(p, 0o755);
+    }
+  }
 
-  const installed = await walkFiles(outRuntime);
-  const binDir = join(outRuntime, "bin");
-  if (!existsSync(join(binDir, wantLm)) || !existsSync(join(binDir, wantSynth))) {
-    throw new Error(
-      `After install, expected ${wantLm} and ${wantSynth} under ${binDir}. ` +
-        `Open an issue with your archive layout (file names under ${packageRoot}).`
-    );
+  if (!existsSync(join(outBin, wantLm)) || !existsSync(join(outBin, wantSynth))) {
+    throw new Error(`After install, missing ${wantLm} or ${wantSynth} under ${outBin}`);
   }
 
   console.log(
-    `[bundle-acestep] Installed acestep-runtime: ${installed.length} files (bin + lib + deps).\n` +
-      `  ${join(binDir, wantLm)}\n` +
-      `  ${join(binDir, wantSynth)}`
+    `[bundle-acestep] Installed ${n} files into ${outBin}\n` +
+      `  ${join(outBin, wantLm)}\n` +
+      `  ${join(outBin, wantSynth)}`
   );
 }
 
