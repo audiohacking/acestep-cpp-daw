@@ -1,14 +1,18 @@
 import { mkdir } from "fs/promises";
 import { join, resolve } from "path";
 import { existsSync } from "fs";
-import { config } from "./config";
+import { config, describeModelAutoconfig } from "./config";
 import { requireAuth } from "./auth";
 import { jsonRes } from "./res";
 import { detailRes } from "./detail";
 import * as store from "./store";
 import * as queue from "./queue";
 import { generateTaskId } from "./worker";
-import { mergeMetadata, parseParamObj } from "./normalize";
+import { mergeMetadata, normalizeRepaintingBounds, parseParamObj } from "./normalize";
+import { normalizeDawBody } from "./dawNormalize";
+import { modelInventoryData, initModelResponse } from "./dawCompat";
+import { tryServeDawStatic, dawDistRoot } from "./dawStatic";
+import { parseFormBoolean } from "./parseBool";
 import { isPathWithin } from "./paths";
 
 const AUDIO_PATH_PREFIX = "/";
@@ -131,6 +135,13 @@ const SAMPLE_CUSTOM = {
   vocal_language: "en",
 } as const;
 
+function progressTextForTask(t: store.Task | undefined): string {
+  if (!t) return "";
+  if (t.status === 0) return t.queue_position != null ? "Queued…" : "Generating…";
+  if (t.status === 1) return "Complete";
+  return t.error ?? "Failed";
+}
+
 function queryResultRow(taskId: string, t: store.Task | undefined) {
   if (!t) {
     const fail = {
@@ -152,6 +163,7 @@ function queryResultRow(taskId: string, t: store.Task | undefined) {
       status: 2 as const,
       result: JSON.stringify([fail]),
       error: "unknown task_id",
+      progress_text: "",
     };
   }
   const row: {
@@ -159,9 +171,11 @@ function queryResultRow(taskId: string, t: store.Task | undefined) {
     status: number;
     result?: string;
     error?: string;
+    progress_text: string;
   } = {
     task_id: t.task_id,
     status: t.status,
+    progress_text: progressTextForTask(t),
   };
   if (t.status === 1 || t.status === 2) {
     if (t.result != null) row.result = t.result;
@@ -170,18 +184,30 @@ function queryResultRow(taskId: string, t: store.Task | undefined) {
   return row;
 }
 
+/** Same-origin DAW uses `fetch('/api/...')`; strip prefix so one server can serve UI + API. */
+function stripApiPathPrefix(pathname: string): string {
+  if (pathname === "/api") return "/";
+  if (pathname.startsWith("/api/")) return pathname.slice(4) || "/";
+  return pathname;
+}
+
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const path = url.pathname;
+  const path = stripApiPathPrefix(url.pathname);
 
   if (path === "/health" && req.method === "GET") {
     const authErr = requireAuth(req.headers.get("Authorization"), undefined);
     if (authErr) return authErr;
+    const lm = Boolean(config.lmModelPath?.trim());
     const probe = await probeAceSynth();
     return jsonRes({
       status: "ok",
       service: "ACE-Step API",
       version: "1.0",
+      models_initialized: true,
+      llm_initialized: lm,
+      loaded_model: config.defaultModel,
+      loaded_lm_model: lm ? config.lmModelPath : null,
       binary: probe.ok ? "ok" : "unavailable",
       binary_path: probe.path,
       binary_hint: probe.hint,
@@ -191,11 +217,25 @@ async function handle(req: Request): Promise<Response> {
   if (path === "/v1/models" && req.method === "GET") {
     const authErr = requireAuth(req.headers.get("Authorization"), undefined);
     if (authErr) return authErr;
-    const models = config.modelsList.map((name) => ({
-      name,
-      is_default: name === config.defaultModel,
-    }));
-    return jsonRes({ models, default_model: config.defaultModel });
+    return jsonRes(modelInventoryData());
+  }
+
+  if (path === "/v1/model_inventory" && req.method === "GET") {
+    const authErr = requireAuth(req.headers.get("Authorization"), undefined);
+    if (authErr) return authErr;
+    return jsonRes(modelInventoryData());
+  }
+
+  if (path === "/v1/init" && req.method === "POST") {
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return detailRes("Invalid JSON body", 400);
+    }
+    const authErr2 = requireAuth(req.headers.get("Authorization"), body.ai_token as string);
+    if (authErr2) return authErr2;
+    return jsonRes(initModelResponse(body));
   }
 
   if (path === "/v1/stats" && req.method === "GET") {
@@ -259,11 +299,19 @@ async function handle(req: Request): Promise<Response> {
       throw e;
     }
 
-    body = mergeMetadata(body);
+    body = normalizeRepaintingBounds(normalizeDawBody(mergeMetadata(body)));
     const authErr2 = requireAuth(req.headers.get("Authorization"), body.ai_token as string);
     if (authErr2) return authErr2;
 
-    const sampleMode = Boolean(body.sample_mode ?? body.sampleMode);
+    const taskTypeEarly = getTaskType(body);
+    if (taskTypeEarly === "stem_separation") {
+      return detailRes(
+        "task_type stem_separation is not supported by acestep-cpp-api (requires full ACE-Step Python server)",
+        501
+      );
+    }
+
+    const sampleMode = parseFormBoolean(body.sample_mode ?? body.sampleMode, false);
     if (!hasTextPrompt(body) && !sampleMode) {
       return detailRes("prompt, caption, or sample_query is required (or enable sample_mode)", 400);
     }
@@ -378,6 +426,11 @@ async function handle(req: Request): Promise<Response> {
     return jsonRes(data);
   }
 
+  if (req.method === "GET") {
+    const staticRes = await tryServeDawStatic(path);
+    if (staticRes) return staticRes;
+  }
+
   return detailRes("Not Found", 404);
 }
 
@@ -389,4 +442,13 @@ const server = Bun.serve({
 
 console.log(`acestep-cpp-api listening on http://${server.hostname}:${server.port}`);
 console.log(`  acestep binaries: ${config.acestepBinDir}`);
-if (config.modelsDir) console.log(`  ACESTEP_MODELS_DIR: ${config.modelsDir}`);
+for (const line of describeModelAutoconfig()) console.log(line);
+if (config.modelsDir) {
+  console.log(`  Effective LM path:        ${config.lmModelPath || "(none)"}`);
+  console.log(`  Effective embedding path: ${config.embeddingModelPath || "(none)"}`);
+  console.log(`  Effective DiT (default):  ${config.ditModelPath || "(none)"}`);
+  console.log(`  Effective VAE path:       ${config.vaeModelPath || "(none)"}`);
+  console.log(`  Lego DiT (base):          ${config.legoDitPath || "(none)"}`);
+  console.log(`  Logical models:           ${config.modelsList.join(", ")}`);
+}
+console.log(`  ACE-Step-DAW static (if built): ${dawDistRoot()}`);

@@ -12,7 +12,9 @@
     "build:windows": "bun run bundle:acestep && bun build ./src/index.ts --compile --minify --sourcemap=external --outfile ./dist/acestep-api.exe && bun run sync:runtime",
     "build:binary-only": "bun build ./src/index.ts --compile --minify --sourcemap=external --outfile ./dist/acestep-api && bun run sync:runtime",
     "build:all": "bun run build && bun run build:windows",
-    "test": "bun test"
+    "test": "bun test ./test",
+    "daw:install": "(cd ACE-Step-DAW && npm install)",
+    "daw:build": "(cd ACE-Step-DAW && npm install && npx vite build)"
   },
   "devDependencies": {
     "@types/bun": "latest"

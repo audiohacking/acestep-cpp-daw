@@ -1,6 +1,12 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { resolveModelFile, resolveReferenceAudioPath, isPathWithin } from "../src/paths";
-import { isAbsolute } from "path";
+import {
+  resolveModelFile,
+  resolveReferenceAudioPath,
+  toAbsolutePath,
+  getResourceRoot,
+  isPathWithin,
+} from "../src/paths";
+import { isAbsolute, resolve } from "path";
 import path from "path";
 
 describe("resolveModelFile", () => {
@@ -46,6 +52,18 @@ describe("resolveModelFile", () => {
     } else {
       expect(actual).toBe("/data/models/dit.gguf");
     }
+  });
+});
+
+describe("toAbsolutePath", () => {
+  test("relative path becomes absolute under resource root", () => {
+    const out = toAbsolutePath("storage/tmp/job/request0.json");
+    expect(out).toBe(resolve(getResourceRoot(), "storage/tmp/job/request0.json"));
+  });
+
+  test("absolute path stays absolute", () => {
+    const p = process.platform === "win32" ? "C:\\\\x\\\\y.json" : "/x/y.json";
+    expect(isAbsolute(toAbsolutePath(p))).toBe(true);
   });
 });
 

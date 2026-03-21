@@ -117,12 +117,15 @@ describe("config modelsList / defaultModel", () => {
     delete process.env.ACESTEP_MODEL_MAP;
   });
 
-  test("defaults to [defaultModel] when no map, no dir, no ACESTEP_MODELS", async () => {
+  test("defaults to logical base+turbo labels when no map, no dir, no ACESTEP_MODELS", async () => {
     delete process.env.ACESTEP_MODELS;
     delete process.env.ACESTEP_MODEL_MAP;
     delete process.env.ACESTEP_DEFAULT_MODEL;
+    delete process.env.ACESTEP_MODELS_DIR;
+    delete process.env.ACESTEP_MODEL_PATH;
+    delete process.env.MODELS_DIR;
     const { config } = await import("../src/config");
-    expect(config.modelsList).toEqual(["acestep-v15-turbo"]);
+    expect(config.modelsList).toEqual(["acestep-v15-base", "acestep-v15-turbo"]);
   });
 
   test("ACESTEP_DEFAULT_MODEL is used as the default model name", async () => {
@@ -155,10 +158,13 @@ describe("config modelsList / defaultModel", () => {
     }
   });
 
-  test("defaultModel falls back to 'acestep-v15-turbo' when nothing is configured", async () => {
+  test("defaultModel falls back to 'acestep-v15-base' when nothing is configured (lego-safe)", async () => {
     delete process.env.ACESTEP_DEFAULT_MODEL;
     delete process.env.ACESTEP_MODEL_MAP;
+    delete process.env.ACESTEP_MODELS_DIR;
+    delete process.env.ACESTEP_MODEL_PATH;
+    delete process.env.MODELS_DIR;
     const { config } = await import("../src/config");
-    expect(config.defaultModel).toBe("acestep-v15-turbo");
+    expect(config.defaultModel).toBe("acestep-v15-base");
   });
 });

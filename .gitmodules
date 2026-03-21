@@ -1,0 +1,3 @@
+[submodule "ACE-Step-DAW"]
+	path = ACE-Step-DAW
+	url = https://github.com/ace-step/ACE-Step-DAW.git

@@ -4,7 +4,9 @@ import { join, resolve } from "path";
 import { config } from "./config";
 import * as store from "./store";
 import { mergeMetadata } from "./normalize";
-import { resolveModelFile, resolveReferenceAudioPath, isPathWithin } from "./paths";
+import { parseFormBoolean } from "./parseBool";
+import { resolveModelFile, resolveReferenceAudioPath, toAbsolutePath, isPathWithin } from "./paths";
+import { clampRepaintingToSourceAudio } from "./repaintClamp";
 
 /** API body (snake_case / camelCase) -> acestep.cpp request JSON. */
 export function apiToRequestJson(body: Record<string, unknown>): Record<string, unknown> {
@@ -12,13 +14,20 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
   const num = (v: unknown, def: number) => (v == null || v === "" ? def : Number(v));
   const prompt = str(body.prompt ?? body.caption ?? "");
   const lyrics = str(body.lyrics ?? "");
-  const useFormat = Boolean(body.use_format ?? body.useFormat ?? body.format ?? false);
+  const taskType = str(body.task_type ?? body.taskType ?? "text2music").toLowerCase();
+  /** examples/lego.json baseline */
+  const legoJsonDefaults = taskType === "lego";
+  const defaultInference = legoJsonDefaults ? 50 : 8;
+  const defaultGuidance = legoJsonDefaults ? 1.0 : 7.0;
+  const defaultShift = legoJsonDefaults ? 1.0 : 3.0;
   /** API default `thinking` is false (ACE-Step 1.5 API.md). */
-  const thinking = body.thinking === true;
-  const sampleMode = Boolean(body.sample_mode ?? body.sampleMode ?? false);
+  const thinking = parseFormBoolean(body.thinking, false);
+  const sampleMode = parseFormBoolean(body.sample_mode ?? body.sampleMode, false);
   const batchSize = Math.min(8, Math.max(1, num(body.batch_size ?? body.batchSize, 2)));
   const seed = num(body.seed, -1);
-  const useRandomSeed = body.use_random_seed !== false && body.useRandomSeed !== false;
+  /** Default on; multipart `"false"` must not stay truthy. */
+  const useRandomSeed =
+    parseFormBoolean(body.use_random_seed, true) && parseFormBoolean(body.useRandomSeed, true);
 
   let audioCodes = "";
   const ac = body.audio_code_string ?? body.audioCodeString;
@@ -44,9 +53,9 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
     use_cot_language: body.use_cot_language !== false && body.useCotLanguage !== false,
     constrained_decoding: body.constrained_decoding !== false && body.constrainedDecoding !== false && body.constrained !== false,
     audio_codes: audioCodes,
-    inference_steps: num(body.inference_steps ?? body.inferenceSteps, 8),
-    guidance_scale: num(body.guidance_scale ?? body.guidanceScale, 7.0),
-    shift: num(body.shift, 3.0),
+    inference_steps: num(body.inference_steps ?? body.inferenceSteps, defaultInference),
+    guidance_scale: num(body.guidance_scale ?? body.guidanceScale, defaultGuidance),
+    shift: num(body.shift, defaultShift),
     audio_cover_strength: num(body.audio_cover_strength ?? body.audioCoverStrength, 0.5),
     repainting_start: num(body.repainting_start ?? body.repaintingStart, -1),
     repainting_end:
@@ -55,8 +64,13 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
         : body.repaintingEnd != null
           ? num(body.repaintingEnd, -1)
           : -1,
-    lego: str(body.lego ?? ""),
+    lego: str(body.lego ?? body.track_name ?? body.trackName ?? ""),
   };
+
+  const instr = body.instruction;
+  if (typeof instr === "string" && instr.trim()) {
+    req.instruction = instr.trim();
+  }
 
   const desc = body.sample_query ?? body.sampleQuery ?? body.description ?? body.desc;
   if (desc) req.caption = str(desc);
@@ -84,7 +98,6 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
     req.audio_codes = "";
   }
 
-  void useFormat;
   return req;
 }
 
@@ -92,9 +105,9 @@ export function apiToRequestJson(body: Record<string, unknown>): Record<string, 
 export function shouldRunAceLm(body: Record<string, unknown>, reqJson: Record<string, unknown>): boolean {
   const codes = String(reqJson.audio_codes ?? "").trim();
   if (codes.length > 0) return false;
-  const thinking = Boolean(body.thinking ?? false);
-  const useFormat = Boolean(body.use_format ?? body.useFormat ?? body.format ?? false);
-  const sampleMode = Boolean(body.sample_mode ?? body.sampleMode ?? false);
+  const thinking = parseFormBoolean(body.thinking, false);
+  const useFormat = parseFormBoolean(body.use_format ?? body.useFormat ?? body.format, false);
+  const sampleMode = parseFormBoolean(body.sample_mode ?? body.sampleMode, false);
   return thinking || useFormat || sampleMode;
 }
 
@@ -114,14 +127,31 @@ export function resolveLmPath(body: Record<string, unknown>): string {
 }
 
 export function resolveDitPath(body: Record<string, unknown>): string {
+  const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase();
+  /** Lego phase must use DiT base; turbo/SFT do not support lego (acestep.cpp examples/lego.sh). */
+  if (taskType === "lego") {
+    const basePath = config.legoDitPath;
+    if (basePath) return basePath;
+    throw new Error(
+      'Lego requires acestep-v15-base DiT (*.gguf with "v15-base" in the name). Add it to ACESTEP_MODELS_DIR or set ACESTEP_MODEL_MAP JSON with "acestep-v15-base": "<file.gguf>".'
+    );
+  }
+
   const modelName = typeof body.model === "string" ? body.model.trim() : "";
   if (modelName) {
     if (config.modelMap[modelName]) return config.modelMap[modelName];
     const scanned = config.scannedModelMap;
     if (scanned[modelName]) return scanned[modelName];
-    throw new Error(`Unknown model "${modelName}". Use GET /v1/models to list available models.`);
+    const known = [...Object.keys(config.modelMap), ...Object.keys(scanned)].sort().join(", ") || "(none)";
+    throw new Error(
+      `Unknown model "${modelName}". Known: ${known}. Use GET /v1/models to list available models.`
+    );
   }
-  if (!config.ditModelPath) throw new Error("ACESTEP_DIT_MODEL or ACESTEP_CONFIG_PATH not set");
+  if (!config.ditModelPath) {
+    throw new Error(
+      "No DiT model: set ACESTEP_DIT_MODEL or ACESTEP_MODELS_DIR with a v15-base or v15-turbo .gguf"
+    );
+  }
   return config.ditModelPath;
 }
 
@@ -130,12 +160,38 @@ export function resolvedModelName(body: Record<string, unknown>): string {
   return modelName || config.defaultModel;
 }
 
-async function exec(cwd: string, cmd: string, args: string[]): Promise<void> {
-  const proc = Bun.spawn([cmd, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr] = await Promise.all([proc.stdout.text(), proc.stderr.text()]);
+async function exec(
+  cwd: string,
+  cmd: string,
+  args: string[],
+  meta: { taskId: string; phase: "ace-lm" | "ace-synth" }
+): Promise<void> {
+  const quiet = process.env.ACESTEP_QUIET_SUBPROCESS === "1";
+  const tag = `[acestep-api] ${meta.taskId} ${meta.phase}`;
+  if (!quiet) {
+    const quoted = args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a));
+    console.log(`${tag} $ ${cmd} ${quoted.join(" ")}`);
+  }
+  const proc = Bun.spawn([cmd, ...args], {
+    cwd,
+    stdout: quiet ? "pipe" : "inherit",
+    stderr: quiet ? "pipe" : "inherit",
+  });
+  let captured = "";
+  if (quiet) {
+    const [out, err] = await Promise.all([proc.stdout!.text(), proc.stderr!.text()]);
+    captured = (err || out).trim();
+  }
   const code = await proc.exited;
+  if (!quiet && code !== 0) {
+    console.error(`${tag} exited with code ${code}`);
+  }
   if (code !== 0) {
-    throw new Error(`exit ${code}: ${stderr || stdout}`);
+    throw new Error(
+      captured
+        ? `exit ${code}: ${captured}`
+        : `exit ${code} (unset ACESTEP_QUIET_SUBPROCESS or set to 0 to stream ace-lm/ace-synth logs)`
+    );
   }
 }
 
@@ -197,7 +253,15 @@ export async function runPipeline(taskId: string): Promise<void> {
 
   try {
     await mkdir(jobDir, { recursive: true });
+    const rawSrcForRepaint = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
     const reqJson = apiToRequestJson(body);
+    if (rawSrcForRepaint) {
+      await clampRepaintingToSourceAudio(
+        reqJson,
+        toAbsolutePath(resolveReferenceAudioPath(rawSrcForRepaint)),
+        body
+      );
+    }
     await writeFile(requestPath, JSON.stringify(reqJson, null, 0));
 
     /** ace-lm: `--request <json> --lm <gguf>` per acestep.cpp README */
@@ -207,14 +271,22 @@ export async function runPipeline(taskId: string): Promise<void> {
     const aceSynth = join(binDir, process.platform === "win32" ? "ace-synth.exe" : "ace-synth");
 
     const lmPath = resolveLmPath(body);
-    const runLm = Boolean(lmPath && shouldRunAceLm(body, reqJson));
+    const needLm = shouldRunAceLm(body, reqJson);
+    const runLm = Boolean(lmPath && needLm);
 
-    if (shouldRunAceLm(body, reqJson) && !lmPath) {
+    console.log(
+      `[acestep-api] ${taskId} request: thinking=${parseFormBoolean(body.thinking, false)} use_format=${parseFormBoolean(body.use_format ?? body.useFormat ?? body.format, false)} sample_mode=${parseFormBoolean(body.sample_mode ?? body.sampleMode, false)} needLm=${needLm} lmConfigured=${Boolean(lmPath?.trim())}`
+    );
+
+    if (needLm && !lmPath) {
       throw new Error("ACESTEP_LM_MODEL (or lm_model_path) required when thinking, use_format, or sample_mode is enabled");
     }
 
     if (runLm) {
-      await exec(jobDir, aceLm, ["--request", requestPath, "--lm", lmPath]);
+      await exec(jobDir, aceLm, ["--request", toAbsolutePath(requestPath), "--lm", toAbsolutePath(lmPath!)], {
+        taskId,
+        phase: "ace-lm",
+      });
     }
 
     const numbered = await listNumberedRequestJsons(jobDir);
@@ -237,25 +309,29 @@ export async function runPipeline(taskId: string): Promise<void> {
     const wantWav = audioFmt === "wav";
 
     const synthArgs: string[] = [];
-    const rawSrc = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
-    if (rawSrc) {
-      const resolvedSrc = resolveReferenceAudioPath(rawSrc);
+    if (rawSrcForRepaint) {
+      const resolvedSrc = resolveReferenceAudioPath(rawSrcForRepaint);
       if (
         !isPathWithin(resolvedSrc, resolve(config.tmpDir)) &&
         !isPathWithin(resolvedSrc, resolve(config.audioStorageDir))
       ) {
-        throw new Error(
-          "Source audio path must be within the configured storage directories"
-        );
+        throw new Error("Source audio path must be within the configured storage directories");
       }
-      synthArgs.push("--src-audio", resolvedSrc);
+      synthArgs.push("--src-audio", toAbsolutePath(resolvedSrc));
     }
-    synthArgs.push("--request", ...numbered);
-    synthArgs.push("--embedding", embedding, "--dit", ditPath, "--vae", vae);
+    synthArgs.push("--request", ...numbered.map(toAbsolutePath));
+    synthArgs.push(
+      "--embedding",
+      toAbsolutePath(embedding),
+      "--dit",
+      toAbsolutePath(ditPath),
+      "--vae",
+      toAbsolutePath(vae)
+    );
 
     const lora = config.loraPath;
     if (lora) {
-      synthArgs.push("--lora", lora, "--lora-scale", String(config.loraScale));
+      synthArgs.push("--lora", toAbsolutePath(lora), "--lora-scale", String(config.loraScale));
     }
     const vc = config.vaeChunk;
     const vo = config.vaeOverlap;
@@ -268,7 +344,7 @@ export async function runPipeline(taskId: string): Promise<void> {
       synthArgs.push("--mp3-bitrate", String(config.mp3Bitrate));
     }
 
-    await exec(jobDir, aceSynth, synthArgs);
+    await exec(jobDir, aceSynth, synthArgs, { taskId, phase: "ace-synth" });
 
     const ext = wantWav ? "wav" : "mp3";
     let outs = await listSynthOutputs(jobDir, ext);

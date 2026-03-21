@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
 /**
  * Downloads acestep.cpp v0.0.3 release binaries for the current OS/arch and
- * installs the full archive contents under <repo>/acestep-runtime/bin
- * (ace-lm, ace-synth, ace-server, ace-understand, neural-codec, mp3-codec,
- * quantize, and all shared libraries).
+ * installs the **full archive** into a **single flat directory**:
+ * `<repo>/acestep-runtime/bin/` (every file by basename — ace-lm, ace-synth,
+ * ace-server, ace-understand, neural-codec, mp3-codec, quantize, and all
+ * shared libraries; no nested lib/ tree).
  *
  * @see https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3
  * @see https://github.com/audiohacking/acestep.cpp/blob/master/README.md
  */
-import { mkdir, readdir, copyFile, chmod, rm } from "fs/promises";
-import { join, dirname } from "path";
+import { mkdir, readdir, chmod, rm, copyFile, stat } from "fs/promises";
+import { join, dirname, basename } from "path";
 import { existsSync } from "fs";
 
 const TAG = "v0.0.3";
@@ -63,6 +64,41 @@ async function extractArchive(archivePath: string, destDir: string): Promise<voi
   }
 }
 
+/** Release archives usually contain a single top-level directory. */
+async function resolvePackageRoot(extractRoot: string): Promise<string> {
+  const entries = await readdir(extractRoot, { withFileTypes: true });
+  const dirs = entries.filter((e) => e.isDirectory());
+  const files = entries.filter((e) => e.isFile());
+  if (dirs.length === 1 && files.length === 0) {
+    return join(extractRoot, dirs[0]!.name);
+  }
+  return extractRoot;
+}
+
+/**
+ * Copy every file from the extracted tree into `outBin` using **basename only**
+ * (flat layout so loaders find libs next to ace-lm / ace-synth).
+ */
+async function flattenIntoBin(packageRoot: string, outBinDir: string): Promise<number> {
+  await mkdir(outBinDir, { recursive: true });
+  const sources = await walkFiles(packageRoot);
+  const seen = new Map<string, string>();
+
+  for (const src of sources) {
+    const name = basename(src);
+    const prev = seen.get(name);
+    if (prev && prev !== src) {
+      throw new Error(
+        `[bundle-acestep] Duplicate basename "${name}" in archive:\n  ${prev}\n  ${src}\n` +
+          "Cannot flatten to a single directory; report this layout."
+      );
+    }
+    seen.set(name, src);
+    await copyFile(src, join(outBinDir, name));
+  }
+  return sources.length;
+}
+
 async function main() {
   const asset = pickAsset();
   if (!asset) return;
@@ -88,38 +124,39 @@ async function main() {
   console.log(`[bundle-acestep] Extracting to ${extractRoot}`);
   await extractArchive(archivePath, extractRoot);
 
-  const all = await walkFiles(extractRoot);
+  const packageRoot = await resolvePackageRoot(extractRoot);
+  const all = await walkFiles(packageRoot);
   const wantLm = process.platform === "win32" ? "ace-lm.exe" : "ace-lm";
   const wantSynth = process.platform === "win32" ? "ace-synth.exe" : "ace-synth";
-  const lm = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantLm);
-  const synth = all.find((p) => (p.split(/[/\\]/).pop() ?? "") === wantSynth);
+  const lm = all.find((p) => basename(p) === wantLm);
+  const synth = all.find((p) => basename(p) === wantSynth);
   if (!lm || !synth) {
-    throw new Error(`Could not find ${wantLm} / ${wantSynth} under ${extractRoot}`);
+    throw new Error(`Could not find ${wantLm} / ${wantSynth} under ${packageRoot}`);
   }
 
-  await rm(outBin, { recursive: true, force: true });
-  await mkdir(outBin, { recursive: true });
-
-  // Copy every file from the archive root so that shared libraries
-  // (libggml*.so / *.dylib / *.dll) and helper binaries are all present.
-  const installed: string[] = [];
-  for (const srcPath of all) {
-    const name = srcPath.split(/[/\\]/).pop() ?? "";
-    const destPath = join(outBin, name);
-    await copyFile(srcPath, destPath);
-    installed.push(destPath);
-  }
+  const runtimeDir = join(root, "acestep-runtime");
+  await rm(runtimeDir, { recursive: true, force: true });
+  console.log(`[bundle-acestep] Flattening ${packageRoot} → ${outBin}`);
+  const n = await flattenIntoBin(packageRoot, outBin);
 
   if (process.platform !== "win32") {
-    // Make all regular files (not static libs) executable so every binary works.
-    for (const destPath of installed) {
-      if (!destPath.endsWith(".a")) {
-        await chmod(destPath, 0o755);
-      }
+    for (const name of await readdir(outBin)) {
+      if (name.endsWith(".a")) continue;
+      const p = join(outBin, name);
+      const st = await stat(p).catch(() => null);
+      if (st?.isFile()) await chmod(p, 0o755);
     }
   }
 
-  console.log(`[bundle-acestep] Installed ${installed.length} file(s) to ${outBin}:\n  ${installed.map((p) => p.split(/[/\\]/).pop()).join("\n  ")}`);
+  if (!existsSync(join(outBin, wantLm)) || !existsSync(join(outBin, wantSynth))) {
+    throw new Error(`After install, missing ${wantLm} or ${wantSynth} under ${outBin}`);
+  }
+
+  console.log(
+    `[bundle-acestep] Installed ${n} files into ${outBin}\n` +
+      `  ${join(outBin, wantLm)}\n` +
+      `  ${join(outBin, wantSynth)}`
+  );
 }
 
 main().catch((e) => {
