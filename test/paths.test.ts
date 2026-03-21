@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { resolveModelFile, resolveReferenceAudioPath } from "../src/paths";
 import { isAbsolute } from "path";
+import path from "path";
 
 describe("resolveModelFile", () => {
   const saved: Record<string, string | undefined> = {};
@@ -26,6 +27,12 @@ describe("resolveModelFile", () => {
     expect(resolveModelFile("model.gguf")).toBe("model.gguf");
   });
 
+  test("joins models dir for bare filename", () => {
+    process.env.ACESTEP_MODELS_DIR = "/data/models";
+    const expected = path.join("/data/models", "dit.gguf");
+    expect(path.normalize(resolveModelFile("dit.gguf"))).toBe(path.normalize(expected));
+  });
+  
   test("joins models dir for bare filename", () => {
     process.env.ACESTEP_MODELS_DIR = "/data/models";
     expect(resolveModelFile("dit.gguf")).toBe("/data/models/dit.gguf");
