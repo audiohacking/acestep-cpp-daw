@@ -1,10 +1,8 @@
 # acestep-cpp-api
 
-[ACE-Step 1.5 HTTP API](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/API.md) proxy backed by [acestep.cpp](https://github.com/audiohacking/acestep.cpp) (`ace-lm` + `ace-synth`). Built with **[Bun](https://bun.sh)**.
+[ACE-Step 1.5 HTTP API](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/API.md) emulator backed by **[acestep.cpp](https://github.com/audiohacking/acestep.cpp)** + **[Bun](https://bun.sh)**.
 
-CLI usage matches the upstream [acestep.cpp README](https://github.com/audiohacking/acestep.cpp/blob/master/README.md): **MP3 by default** (128 kbps, overridable), **`--wav`** for stereo 48 kHz WAV, plus optional **`--lora`**, **`--lora-scale`**, **`--vae-chunk`**, **`--vae-overlap`**, **`--mp3-bitrate`**.
-
-## Bundled acestep.cpp binaries (v0.0.3)
+## Bundled acestep.cpp (v0.0.3)
 
 `bun run build` downloads the correct asset from **[acestep.cpp releases v0.0.3](https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3)** for the **current** OS/arch, installs them under `acestep-runtime/bin/`, compiles `dist/acestep-api`, then copies `acestep-runtime` next to the executable:
 
