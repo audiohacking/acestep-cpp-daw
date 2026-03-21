@@ -40,16 +40,68 @@ export function clampRepaintingSeconds(
 export async function clampRepaintingToSourceAudio(
   reqJson: Record<string, unknown>,
   sourceAudioPath: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  opts?: { taskId?: string }
 ): Promise<void> {
   const duration = await readWavDurationSeconds(sourceAudioPath);
-  if (duration == null || !(duration > 0)) return;
+  const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase() || "?";
+  const tag = opts?.taskId ? `[acestep-api] ${opts.taskId}` : "[acestep-api]";
+
+  if (duration == null || !(duration > 0)) {
+    console.log(
+      `${tag} clampRepaintingBounds task_type=${taskType}: could not read WAV duration (need RIFF/WAV for --src-audio); ` +
+        `repainting bounds left unchanged: start=${reqJson.repainting_start} end=${reqJson.repainting_end} path=${sourceAudioPath}`
+    );
+    return;
+  }
 
   const rs0 = Number(reqJson.repainting_start);
   const re0 = Number(reqJson.repainting_end);
   const bpm = Number(body.bpm ?? reqJson.bpm ?? 0);
 
   const { start, end } = clampRepaintingSeconds(rs0, re0, duration, bpm);
+  const changed = start !== rs0 || end !== re0;
+  console.log(
+    `${tag} clampRepaintingBounds task_type=${taskType}: wav_duration_s=${duration.toFixed(4)} bpm=${bpm} ` +
+      `before=(${rs0},${re0}) after=(${start},${end}) src=${sourceAudioPath}` +
+      (changed ? "" : " (unchanged)")
+  );
   reqJson.repainting_start = start;
   reqJson.repainting_end = end;
+}
+
+/**
+ * acestep.cpp `duration` is **target audio length in seconds** for LM/FSM (see upstream README).
+ * The DAW sends `audio_duration` as **full project timeline length** while `repainting_*` marks the
+ * active segment `[start, end)`. If we leave `duration` = full project (e.g. 128s) but the mask is
+ * only a few seconds (e.g. 0–4s), generation targets the wrong length — set `duration` to the
+ * **segment length** `end - start` after bounds are final (post-clamp).
+ *
+ * Skips when repainting is inactive (`re <= rs` or negative sentinels) or task is not src-audio based.
+ */
+export function applySegmentTargetDuration(
+  reqJson: Record<string, unknown>,
+  body: Record<string, unknown>,
+  opts?: { taskId?: string }
+): void {
+  const taskType = String(body.task_type ?? body.taskType ?? "").toLowerCase();
+  if (!["lego", "repaint", "cover"].includes(taskType)) return;
+
+  const rs = Number(reqJson.repainting_start);
+  const re = Number(reqJson.repainting_end);
+  if (!Number.isFinite(rs) || !Number.isFinite(re)) return;
+  if (rs < 0 || re <= rs) return;
+
+  const segmentSec = re - rs;
+  const metaDur = Number(body.audio_duration ?? body.audioDuration ?? body.duration ?? 0);
+  const prev = Number(reqJson.duration ?? 0);
+
+  /** Target generation length for the masked window (acestep `duration` = seconds). */
+  reqJson.duration = segmentSec;
+
+  const tag = opts?.taskId ? `[acestep-api] ${opts.taskId}` : "[acestep-api]";
+  console.log(
+    `${tag} durationOverride task_type=${taskType}: repainting [${rs}, ${re}) segment_s=${segmentSec.toFixed(4)} ` +
+      `audio_duration_meta=${Number.isFinite(metaDur) && metaDur > 0 ? metaDur : "n/a"} → duration=${segmentSec} (was ${prev})`
+  );
 }

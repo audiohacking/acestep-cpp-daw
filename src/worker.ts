@@ -6,7 +6,7 @@ import * as store from "./store";
 import { mergeMetadata } from "./normalize";
 import { parseFormBoolean } from "./parseBool";
 import { resolveModelFile, resolveReferenceAudioPath, toAbsolutePath, isPathWithin } from "./paths";
-import { clampRepaintingToSourceAudio } from "./repaintClamp";
+import { applySegmentTargetDuration, clampRepaintingToSourceAudio } from "./repaintClamp";
 
 /** API body (snake_case / camelCase) -> acestep.cpp request JSON. */
 export function apiToRequestJson(body: Record<string, unknown>): Record<string, unknown> {
@@ -253,15 +253,20 @@ export async function runPipeline(taskId: string): Promise<void> {
 
   try {
     await mkdir(jobDir, { recursive: true });
+    /** Uploaded or path-based source for cover/repaint/lego (not repaint-only). */
     const rawSrcForRepaint = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
     const reqJson = apiToRequestJson(body);
     if (rawSrcForRepaint) {
       await clampRepaintingToSourceAudio(
         reqJson,
         toAbsolutePath(resolveReferenceAudioPath(rawSrcForRepaint)),
-        body
+        body,
+        { taskId }
       );
     }
+    /** Align `duration` with repainting window for lego/repaint/cover (see applySegmentTargetDuration). */
+    applySegmentTargetDuration(reqJson, body, { taskId });
+
     await writeFile(requestPath, JSON.stringify(reqJson, null, 0));
 
     /** ace-lm: `--request <json> --lm <gguf>` per acestep.cpp README */

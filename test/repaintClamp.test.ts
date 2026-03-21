@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clampRepaintingSeconds } from "../src/repaintClamp";
+import { applySegmentTargetDuration, clampRepaintingSeconds } from "../src/repaintClamp";
 
 describe("clampRepaintingSeconds", () => {
   test("DAW beats 4–8 on 0.1s clip: after beat→sec still collapses → -1", () => {
@@ -34,5 +34,43 @@ describe("clampRepaintingSeconds", () => {
     const { start, end } = clampRepaintingSeconds(-1, -1, 5, 120);
     expect(start).toBe(-1);
     expect(end).toBe(-1);
+  });
+});
+
+describe("applySegmentTargetDuration", () => {
+  test("lego: sets duration to repainting_end - repainting_start, not full audio_duration", () => {
+    const req: Record<string, unknown> = {
+      duration: 128,
+      repainting_start: 0,
+      repainting_end: 4,
+    };
+    applySegmentTargetDuration(req, { task_type: "lego", audio_duration: 128 });
+    expect(req.duration).toBe(4);
+  });
+
+  test("repaint: segment 10–25 → duration 15", () => {
+    const req: Record<string, unknown> = {
+      duration: 200,
+      repainting_start: 10,
+      repainting_end: 25,
+    };
+    applySegmentTargetDuration(req, { task_type: "repaint", audio_duration: 200 });
+    expect(req.duration).toBe(15);
+  });
+
+  test("inactive repainting (-1) does not change duration", () => {
+    const req: Record<string, unknown> = {
+      duration: 128,
+      repainting_start: -1,
+      repainting_end: -1,
+    };
+    applySegmentTargetDuration(req, { task_type: "lego", audio_duration: 128 });
+    expect(req.duration).toBe(128);
+  });
+
+  test("text2music ignored", () => {
+    const req: Record<string, unknown> = { duration: 60, repainting_start: 0, repainting_end: 10 };
+    applySegmentTargetDuration(req, { task_type: "text2music", audio_duration: 120 });
+    expect(req.duration).toBe(60);
   });
 });

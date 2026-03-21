@@ -14,6 +14,7 @@ import { modelInventoryData, initModelResponse } from "./dawCompat";
 import { tryServeDawStatic, dawDistRoot } from "./dawStatic";
 import { parseFormBoolean } from "./parseBool";
 import { isPathWithin } from "./paths";
+import { repaintSnapshot } from "./repaintLog";
 
 const AUDIO_PATH_PREFIX = "/";
 
@@ -299,7 +300,15 @@ async function handle(req: Request): Promise<Response> {
       throw e;
     }
 
+    const incomingRepaint = repaintSnapshot(body);
     body = normalizeRepaintingBounds(normalizeDawBody(mergeMetadata(body)));
+    const afterNormRepaint = repaintSnapshot(body);
+    const ttAfterNorm = getTaskType(body);
+    if (ttAfterNorm === "repaint" || ttAfterNorm === "lego") {
+      console.log(
+        `[acestep-api] release_task ${taskId} task_type=${ttAfterNorm} repainting_trace incoming=${JSON.stringify(incomingRepaint)} after_normalize=${JSON.stringify(afterNormRepaint)}`
+      );
+    }
     const authErr2 = requireAuth(req.headers.get("Authorization"), body.ai_token as string);
     if (authErr2) return authErr2;
 

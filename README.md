@@ -222,6 +222,22 @@ Worker uses **`src_audio_path`** when set, otherwise **`reference_audio_path`**;
 
 **Repaint bounds:** (1) If both are set and **`repainting_end` ≤ `repainting_start`**, they are cleared to **`-1`** before enqueue. (2) When **`--src-audio`** is a **WAV**, the worker measures its duration and reclamps repaint to **seconds on that file**; values larger than the file length are treated as **beats** using **`bpm`**, then clamped. If the window still collapses (**`end` ≤ `start`**), both are set to **`-1`** so ace-synth does not error on short context clips.
 
+**DAW contract:** ACE-Step-DAW sends **`repainting_start` / `repainting_end` as absolute project timeline seconds** (same time base as the cumulative mix WAV: sample 0 = project t=0). The cumulative mix uploaded as **`src_audio`** must span the full project length so those seconds match the PCM timeline. If you see tiny ranges (e.g. **0.0–0.1 s**) in logs, check the DAW repaint modal selection and that the WAV duration in logs matches the project length.
+
+**Debugging:** On `task_type: repaint`, the server logs **`repaint release_task … incoming` / `after_normalize`** (multipart/JSON as parsed). During the job it logs **`clampRepaintingBounds task_type=… wav_duration_s=… before=(start,end) after=(…)`** (or a warning if **`--src-audio`** is not a readable WAV — clamp is skipped and bounds stay as sent).
+
+**`repainting_*` on `lego` (not only `repaint`):** ACE-Step-DAW sends **`repainting_start` / `repainting_end`** for **lego** too — segment bounds on the **project timeline** (same seconds as the cumulative `src_audio` WAV). Example decoded from a real capture: `task_type=lego`, `repainting_start=0`, `repainting_end=4`, `audio_duration=128` (project length metadata). Do **not** assume a log line that mentions “repaint” in the **engine** always means `task_type: repaint`; check **`task_type`** in API logs first.
+
+**`duration` in request JSON (acestep.cpp):** Upstream **`duration`** is the **target audio length in seconds** for LM/FSM. The DAW sends **`audio_duration`** as **project/timeline length** (e.g. 128s) while **`repainting_*`** marks the active segment (e.g. 0–4s). After clamping bounds to the WAV, the worker sets **`duration` = `repainting_end - `repainting_start`** for **`lego`**, **`repaint`**, and **`cover`** when both bounds are active (**`end` > `start` ≥ 0**). If repainting is inactive (**`-1`**), **`duration`** stays from **`audio_duration`** / **`duration`** as before. Logs: **`durationOverride`**.
+
+**Decode a browser Base64 multipart capture** (e.g. from DevTools → Copy as Base64):
+
+```bash
+printf '%s' 'PASTE_BASE64_HERE' | base64 -d | strings | head -80
+# or inspect form fields:
+printf '%s' 'PASTE_BASE64_HERE' | base64 -d | rg 'name="(task_type|repainting_|audio_duration)"' -A1
+```
+
 ## API emulation notes
 
 See [`docs/API.md`](docs/API.md) for the full endpoint reference. **`/format_input`** and **`/create_random_sample`** are shape-compatible stubs (no separate LM HTTP service required).

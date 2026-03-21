@@ -123,7 +123,7 @@ Both **snake_case** and **camelCase** aliases are accepted. Metadata can also be
 | `bpm` | int | null | Tempo in BPM (30–300) |
 | `key_scale` | string | `""` | Key/scale (e.g. `"C Major"`, `"Am"`) — aliases: `keyscale`, `keyScale` |
 | `time_signature` | string | `""` | `"2"`, `"3"`, `"4"`, or `"6"` — aliases: `timesignature`, `timeSignature` |
-| `audio_duration` | float | null | Duration in seconds (10–600) — aliases: `duration`, `target_duration` |
+| `audio_duration` | float | null | Duration in seconds (10–600) — aliases: `duration`, `target_duration`. For **`lego` / `repaint` / `cover`** with an explicit **`repainting_start` / `repainting_end`** window, the server sets request JSON **`duration`** to **`repainting_end - repainting_start`** (segment length) after clamping, so acestep’s target length matches the mask (see [acestep.cpp README](https://github.com/audiohacking/acestep.cpp/blob/master/README.md) `duration` field). |
 
 #### Audio Codes
 
