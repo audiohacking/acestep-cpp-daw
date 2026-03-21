@@ -169,6 +169,8 @@ If **`task_type`** is `cover`, `repaint`, or `lego` and neither a path nor an up
 
 Worker uses **`src_audio_path`** when set, otherwise **`reference_audio_path`**; a single `--src-audio` is passed to ace-synth. Request JSON already supports **`audio_cover_strength`**, **`repainting_start`** / **`repainting_end`**, and **`lego`** (track name) per [acestep.cpp README](https://github.com/audiohacking/acestep.cpp/blob/master/README.md).
 
+**Repaint bounds:** if both **`repainting_start`** and **`repainting_end`** are set and **`repainting_end` ≤ `repainting_start`** (ace-synth would error), the API normalizes both to **`0`** (auto / full-track) before enqueue.
+
 ## API emulation notes
 
 See earlier revisions for full AceStep 1.5 route mapping. **`/format_input`** and **`/create_random_sample`** remain shape-compatible stubs (no separate LM HTTP service).

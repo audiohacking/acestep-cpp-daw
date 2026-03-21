@@ -7,7 +7,7 @@ import { detailRes } from "./detail";
 import * as store from "./store";
 import * as queue from "./queue";
 import { generateTaskId } from "./worker";
-import { mergeMetadata, parseParamObj } from "./normalize";
+import { mergeMetadata, normalizeRepaintingBounds, parseParamObj } from "./normalize";
 import { normalizeDawBody } from "./dawNormalize";
 import { modelInventoryData, initModelResponse } from "./dawCompat";
 import { tryServeDawStatic, dawDistRoot } from "./dawStatic";
@@ -271,7 +271,7 @@ async function handle(req: Request): Promise<Response> {
       throw e;
     }
 
-    body = normalizeDawBody(mergeMetadata(body));
+    body = normalizeRepaintingBounds(normalizeDawBody(mergeMetadata(body)));
     const authErr2 = requireAuth(req.headers.get("Authorization"), body.ai_token as string);
     if (authErr2) return authErr2;
 

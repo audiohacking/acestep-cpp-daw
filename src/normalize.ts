@@ -1,3 +1,25 @@
+/**
+ * acestep.cpp rejects repaint when repainting_end <= repainting_start.
+ * If both bounds are set and invalid, reset to 0/0 (auto / full-track behavior per API convention).
+ */
+export function normalizeRepaintingBounds(body: Record<string, unknown>): Record<string, unknown> {
+  const toNum = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const rs = toNum(body.repainting_start ?? body.repaintingStart);
+  const re = toNum(body.repainting_end ?? body.repaintingEnd);
+  if (rs == null || re == null) return body;
+  if (re <= rs) {
+    body.repainting_start = 0;
+    body.repainting_end = 0;
+    body.repaintingStart = 0;
+    body.repaintingEnd = 0;
+  }
+  return body;
+}
+
 /** Flatten AceStep API metas / metadata / user_metadata into the root body. */
 export function mergeMetadata(body: Record<string, unknown>): Record<string, unknown> {
   const out = { ...body };
