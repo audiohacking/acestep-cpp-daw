@@ -6,7 +6,8 @@
 
 ## ACE-Step-DAW (submodule + same-origin UI) for Acestep.cpp
 
-![acestep-daw-demo-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/1ef3a031-8a84-4bee-8a29-567f620ffa59)
+![acestep-daw-demo1-ezgif com-optimize](https://github.com/user-attachments/assets/d6a3426c-50c4-47a9-90c7-be6479c40bae)
+
 
 This repo includes **[ACE-Step-DAW](https://github.com/ace-step/ACE-Step-DAW)** as a **git submodule** at `ACE-Step-DAW/`.
 
