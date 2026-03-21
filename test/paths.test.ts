@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { resolveModelFile, resolveReferenceAudioPath } from "../src/paths";
-import { isAbsolute } from "path";
+import { resolveModelFile, resolveReferenceAudioPath, toAbsolutePath, getResourceRoot } from "../src/paths";
+import { isAbsolute, resolve } from "path";
 
 describe("resolveModelFile", () => {
   const saved: Record<string, string | undefined> = {};
@@ -29,6 +29,18 @@ describe("resolveModelFile", () => {
   test("joins models dir for bare filename", () => {
     process.env.ACESTEP_MODELS_DIR = "/data/models";
     expect(resolveModelFile("dit.gguf")).toBe("/data/models/dit.gguf");
+  });
+});
+
+describe("toAbsolutePath", () => {
+  test("relative path becomes absolute under resource root", () => {
+    const out = toAbsolutePath("storage/tmp/job/request0.json");
+    expect(out).toBe(resolve(getResourceRoot(), "storage/tmp/job/request0.json"));
+  });
+
+  test("absolute path stays absolute", () => {
+    const p = process.platform === "win32" ? "C:\\\\x\\\\y.json" : "/x/y.json";
+    expect(isAbsolute(toAbsolutePath(p))).toBe(true);
   });
 });
 

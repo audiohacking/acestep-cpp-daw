@@ -1,7 +1,7 @@
 /** Env-based config. Binaries: https://github.com/audiohacking/acestep.cpp/releases/tag/v0.0.3 */
 import { join, resolve } from "path";
 import { scanModelsDirectory, type ModelScanResult } from "./modelScan";
-import { resolveModelFile, resolveModelMapPaths, resolveAcestepBinDir } from "./paths";
+import { resolveModelFile, resolveModelMapPaths, resolveAcestepBinDir, toAbsolutePath } from "./paths";
 
 function parseModelMap(raw: string): Record<string, string> {
   if (!raw.trim()) return {};
@@ -130,8 +130,13 @@ export const config = {
   vaeChunk: process.env.ACESTEP_VAE_CHUNK?.trim() ?? "",
   vaeOverlap: process.env.ACESTEP_VAE_OVERLAP?.trim() ?? "",
 
-  audioStorageDir: process.env.ACESTEP_AUDIO_STORAGE ?? "./storage/audio",
-  tmpDir: process.env.ACESTEP_TMPDIR ?? "./storage/tmp",
+  /** Always absolute — ace-synth is spawned with `cwd` = job dir; relative JSON paths must not depend on cwd. */
+  get audioStorageDir() {
+    return toAbsolutePath(process.env.ACESTEP_AUDIO_STORAGE ?? "./storage/audio");
+  },
+  get tmpDir() {
+    return toAbsolutePath(process.env.ACESTEP_TMPDIR ?? "./storage/tmp");
+  },
   queueMaxSize: parseInt(process.env.ACESTEP_QUEUE_MAXSIZE ?? "200", 10),
   queueWorkers: parseInt(process.env.ACESTEP_QUEUE_WORKERS ?? process.env.ACESTEP_API_WORKERS ?? "1", 10),
 

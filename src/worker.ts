@@ -5,7 +5,7 @@ import { config } from "./config";
 import * as store from "./store";
 import { mergeMetadata } from "./normalize";
 import { parseFormBoolean } from "./parseBool";
-import { resolveModelFile, resolveReferenceAudioPath } from "./paths";
+import { resolveModelFile, resolveReferenceAudioPath, toAbsolutePath } from "./paths";
 
 /** API body (snake_case / camelCase) -> acestep.cpp request JSON. */
 export function apiToRequestJson(body: Record<string, unknown>): Record<string, unknown> {
@@ -261,7 +261,10 @@ export async function runPipeline(taskId: string): Promise<void> {
     }
 
     if (runLm) {
-      await exec(jobDir, aceLm, ["--request", requestPath, "--lm", lmPath!], { taskId, phase: "ace-lm" });
+      await exec(jobDir, aceLm, ["--request", toAbsolutePath(requestPath), "--lm", toAbsolutePath(lmPath!)], {
+        taskId,
+        phase: "ace-lm",
+      });
     }
 
     const numbered = await listNumberedRequestJsons(jobDir);
@@ -286,14 +289,21 @@ export async function runPipeline(taskId: string): Promise<void> {
     const synthArgs: string[] = [];
     const rawSrc = String(body.src_audio_path ?? body.reference_audio_path ?? "").trim();
     if (rawSrc) {
-      synthArgs.push("--src-audio", resolveReferenceAudioPath(rawSrc));
+      synthArgs.push("--src-audio", toAbsolutePath(resolveReferenceAudioPath(rawSrc)));
     }
-    synthArgs.push("--request", ...numbered);
-    synthArgs.push("--embedding", embedding, "--dit", ditPath, "--vae", vae);
+    synthArgs.push("--request", ...numbered.map(toAbsolutePath));
+    synthArgs.push(
+      "--embedding",
+      toAbsolutePath(embedding),
+      "--dit",
+      toAbsolutePath(ditPath),
+      "--vae",
+      toAbsolutePath(vae)
+    );
 
     const lora = config.loraPath;
     if (lora) {
-      synthArgs.push("--lora", lora, "--lora-scale", String(config.loraScale));
+      synthArgs.push("--lora", toAbsolutePath(lora), "--lora-scale", String(config.loraScale));
     }
     const vc = config.vaeChunk;
     const vo = config.vaeOverlap;

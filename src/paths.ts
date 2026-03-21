@@ -19,6 +19,17 @@ export function getResourceRoot(): string {
   return resolve(dirname(here), "..");
 }
 
+/**
+ * Make paths absolute under {@link getResourceRoot} so subprocesses (ace-lm / ace-synth) can open them
+ * regardless of `cwd`. Relative `ACESTEP_TMPDIR` request JSON paths were breaking when `cwd` was the job dir.
+ */
+export function toAbsolutePath(pathOrEmpty: string): string {
+  const p = pathOrEmpty.trim();
+  if (!p) return p;
+  if (isAbsolute(p)) return resolve(p);
+  return resolve(getResourceRoot(), p);
+}
+
 /** Default bundled acestep.cpp binaries (from `scripts/bundle-acestep.ts`). */
 export function defaultBundledBinDir(root: string): string {
   return join(root, "acestep-runtime", "bin");
