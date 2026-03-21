@@ -38,7 +38,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
+
+      - name: Submodule ACE-Step-DAW only (non-recursive)
+        shell: bash
+        run: |
+          git submodule sync -- ACE-Step-DAW
+          git submodule update --init --depth 1 -- ACE-Step-DAW
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

@@ -30,12 +30,18 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      # Do NOT use actions/checkout submodules: true|recursive — it always passes
+      # --recursive and breaks on ACE-Step-DAW's optional nested paths (no url in .gitmodules).
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Top-level ACE-Step-DAW only. Do not recurse: upstream DAW may list nested
-          # submodules (e.g. tooling) without public URLs, which breaks CI.
-          submodules: true
+          submodules: false
+
+      - name: Submodule ACE-Step-DAW only (non-recursive)
+        shell: bash
+        run: |
+          git submodule sync -- ACE-Step-DAW
+          git submodule update --init --depth 1 -- ACE-Step-DAW
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
