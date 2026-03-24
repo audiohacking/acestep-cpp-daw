@@ -1,0 +1,62 @@
+# Nightly job that bumps every git submodule to the latest upstream HEAD
+# and opens (or updates) a PR so the change goes through normal review.
+name: Update submodules
+
+on:
+  schedule:
+    # 03:00 UTC every day
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: Bump submodules to latest HEAD
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (no submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          # SUBMODULE_UPDATE_PAT: a Personal Access Token (repo + workflow scopes)
+          # stored as a repository secret. Without it the GITHUB_TOKEN is used,
+          # but pushes made by GITHUB_TOKEN do NOT trigger CI workflows on the
+          # resulting PR. Create a PAT at Settings → Developer settings →
+          # Personal access tokens and add it at Settings → Secrets → Actions.
+          token: ${{ secrets.SUBMODULE_UPDATE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Update every submodule to remote HEAD
+        id: update
+        shell: bash
+        run: |
+          git submodule sync
+          git submodule update --init --remote --depth 1
+
+          if git diff --quiet HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push branch and open PR
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.SUBMODULE_UPDATE_PAT || secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update submodules to latest HEAD"
+          branch: chore/update-submodules
+          delete-branch: true
+          title: "chore: update submodules to latest HEAD"
+          body: |
+            Automated nightly submodule update.
+
+            This PR was opened by the **Update submodules** workflow. It bumps
+            every registered git submodule to the latest commit on its remote
+            default branch.
+
+            Merge when CI passes.
+          labels: dependencies
